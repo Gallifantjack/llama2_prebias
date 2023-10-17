@@ -54,23 +54,15 @@ All plots are stored in out/visualize
 ```bash
 eval.py
 ```
+This loads the model and generates a sequence of 200 tokens. It then compares the generated sequence to the expected sequence and other metrics such as sentance length and ourputs the results to a csv file in out/tables.
 
 
-### 4. Ouput Evaluation
+### 5. Saturation curves
+- plot each of the eval metrics against the number of training steps
 
 
-## unsorted todos
--     - pt 2- output eval
-        - use python test script (200 toks output)
-            - then bootstrap to get multiple outputs
-        - adjust compare script
-            - not just comp vs expected 
-            - co-occurance etc 
-            - plot comparison/performance
-
-
-## 5. Batch play
-- characterise each batch 
+## 6. Batch play
+- characterise each batch using same metrics as above 
 - play with sequencing 
 - add specific tag to seq for durability
 

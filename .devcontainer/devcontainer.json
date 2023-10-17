@@ -16,15 +16,17 @@
     "terminal.integrated.shell.linux": "/bin/bash"
   },
   "extensions": [
-    "ms-python.python",
-    "ms-python.vscode-pylance",
-    "github.copilot",
-    "ms-azuretools.vscode-docker",
-    "ms-python.black-formatter",
-    "ms-vscode.cpptools-extension-pack",
-    "ms-vscode.cpptools"
-  ],
+	"ms-python.python",
+	"ms-python.vscode-pylance",
+	"github.copilot",
+	"ms-azuretools.vscode-docker",
+	"ms-python.black-formatter",
+	"ms-vscode.cpptools-extension-pack",
+	"ms-vscode.cpptools",
+	"GrapeCity.gc-excelviewer"
+],
   "forwardPorts": [],
   "postCreateCommand": "",
   "remoteUser": "root"
 }
+

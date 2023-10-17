@@ -1,6 +1,7 @@
 .env 
 data/
-out/
+out/models/
+out/ckpt/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
