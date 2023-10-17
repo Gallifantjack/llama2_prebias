@@ -1,0 +1,28 @@
+{
+  "name": "Python Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": "..",
+    "args": {
+      "GIT_USER_NAME": "${localEnv:GIT_USER_NAME}",
+      "GIT_USER_EMAIL": "${localEnv:GIT_USER_EMAIL}"
+    }
+  },
+  "runArgs": [
+    "--gpus",
+    "all"
+  ],
+  "settings": {
+    "terminal.integrated.shell.linux": "/bin/bash"
+  },
+  "extensions": [
+	"ms-python.python",
+	"ms-python.vscode-pylance",
+	"github.copilot",
+	"ms-azuretools.vscode-docker",
+	"ms-python.black-formatter"
+],  
+  "forwardPorts": [],
+  "postCreateCommand": "",
+  "remoteUser": "root"
+}
