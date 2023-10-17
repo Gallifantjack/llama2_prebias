@@ -293,6 +293,7 @@ class Transformer(nn.Module):
 
         # Initialize attribute for the loss of the last forward call. This will be set if the forward is called with a targets tensor.
         self.last_loss = None
+        self.all_layers_last_attn_weights = None
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -301,6 +302,18 @@ class Transformer(nn.Module):
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+    def get_all_layers_attention_weights(self):
+        """
+        Get the attention weights of all layers.
+        """
+        return self.all_layers_last_attn_weights
+
+    def reset_all_layers_attention_weights(self):
+        """
+        Reset the attention weights of all layers.
+        """
+        self.all_layers_last_attn_weights = None
 
     def forward(
         self, tokens: torch.Tensor, targets: Optional[torch.Tensor] = None
@@ -327,6 +340,13 @@ class Transformer(nn.Module):
                 h[:, [-1], :]
             )  # note: using list [-1] to preserve the time dim
             self.last_loss = None
+
+        all_attn_weights = []
+        for layer in self.layers:
+            h = layer(h, freqs_cos, freqs_sin)
+            # append the attention weights of the current layer to the list
+            all_attn_weights.append(layer.attention.last_attn_weights)
+        self.all_layers_last_attn_weights = all_attn_weights
 
         return logits
 

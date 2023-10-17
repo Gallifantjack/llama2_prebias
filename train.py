@@ -61,7 +61,7 @@ dropout = 0.0
 # adamw optimizer
 gradient_accumulation_steps = 4  # used to simulate larger batch sizes
 learning_rate = 5e-4  # max learning rate
-max_iters = 100  # total number of training iterations
+max_iters = 500  # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
@@ -318,21 +318,27 @@ while True:
                     "config": config,
                 }
 
-                # Save attention weights if they exist
-                if (
-                    hasattr(raw_model, "last_attn_weights")
-                    and raw_model.last_attn_weights is not None
-                ):
-                    checkpoint["last_attn_weights"] = raw_model.last_attn_weights
+                # Save attention weights
+                checkpoint[
+                    "last_attn_weights"
+                ] = raw_model.get_all_layers_attention_weights()
 
                 # Save token embeddings
                 tok_embeddings = raw_model.tok_embeddings.weight.data.clone()
                 checkpoint["tok_embeddings"] = tok_embeddings
 
-                print(f"saving checkpoint to {out_dir}")
-                torch.save(checkpoint, os.path.join(out_dir, "ckpt.pt"))
+                # save paths
+                checkpoint_filename = f"ckpt/ckpt_{iter_num}.pt"
+                print(
+                    f"saving checkpoint to {os.path.join(out_dir, checkpoint_filename)}"
+                )
+                torch.save(checkpoint, os.path.join(out_dir, checkpoint_filename))
 
-                model_export(raw_model, os.path.join(out_dir, "model.bin"), version=0)
+                model_filename = f"models/model_{iter_num}.bin"
+                print(f"saving model to {os.path.join(out_dir, model_filename)}")
+                model_export(
+                    raw_model, os.path.join(out_dir, model_filename), version=0
+                )
 
     if iter_num == 0 and eval_only:
         break
@@ -379,6 +385,10 @@ while True:
         print(
             f"{iter_num} | loss {lossf:.4f} | lr {lr:e} | {dt*1000:.2f}ms | mfu {running_mfu*100:.2f}%"
         )
+
+    # Reset the attention weights after each iteration
+    raw_model.reset_all_layers_attention_weights()
+
     iter_num += 1
     local_iter_num += 1
 

@@ -30,27 +30,51 @@ python train.py
 
 This creates a model.bin file in the root directory that contains the trained model.
 
-### 3. Evaluation
+### 3. Model Evaluation
+There are three main scripts for checkpoint evaluation:
+
+1. Attention Visualization
+```bash
+python visualize_attn.py
+```
+
+These take the stored attention weights from each checkpoint and plot the attention weights for each layer and head
+python visualize_embd.py
+
+2. Embedding Visualization
+```bash
+python visualize_embd.py
+```
+
+This takes the stored embeddings from each checkpoint and plots the embeddings using PCA.
+
+All plots are stored in out/visualize
+
+3. Output Evaluation
+```bash
+eval.py
+```
+
+
+### 4. Ouput Evaluation
+
+
 ## unsorted todos
-- pretend that the full training is only a checkpoint in early stages
-    - pt 1- model specs
-        - extract attention and embedding weights
-        - visualise as in hf blog
-    - pt 2- output eval
+-     - pt 2- output eval
         - use python test script (200 toks output)
             - then bootstrap to get multiple outputs
         - adjust compare script
             - not just comp vs expected 
             - co-occurance etc 
             - plot comparison/performance
-    - pt 3- throughout
-        - add logging
-        - add tensorboard
-        - add checkpointing
-        - repeat pt 1-2
 
-## 4. Batch play
-- sequencing and durability
+
+## 5. Batch play
+- characterise each batch 
+- play with sequencing 
+- add specific tag to seq for durability
+
+## 6. Ideal Batch selection
 - ideal batch selection
 
 
