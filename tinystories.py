@@ -144,9 +144,6 @@ def process_shard(args, vocab_size):
     batch_metrics = []
 
     for idx, example in enumerate(tqdm(data, position=shard_id)):
-        if idx >= 5:  # Break after processing the first 5 examples
-            break
-
         text = example["story"]
 
         # Evaluate text using the Evaluator class functions
@@ -154,7 +151,6 @@ def process_shard(args, vocab_size):
         batch_metric["batch_id"] = shard_id  # Adding the batch_id to the metrics
         batch_metric["example_id"] = idx  # Adding an example_id
         batch_metrics.append(batch_metric)
-        print(f"Metrics: {batch_metric}")
 
         text = text.strip()  # get rid of leading/trailing whitespace
         tokens = enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
@@ -168,7 +164,6 @@ def process_shard(args, vocab_size):
         tokenized_filename = shard.replace(".json", ".bin")
         # Save the metrics in a csv file
         metrics_filename = shard.replace(".json", "_metrics.csv")
-        print(metrics_filename)
 
     else:
         # save .bin files into a new tok{N} directory
@@ -192,26 +187,23 @@ def process_shard(args, vocab_size):
     print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
 
     # Save the DataFrame to its own CSV file
-    print(f"Saving metrics to {metrics_filename}")
     df_new = pl.DataFrame(batch_metrics)
     df_new.write_csv(metrics_filename)
     print(f"Saved {metrics_filename}")
 
 
-def merge_csvs(vocab_size):
+def merge_csvs(vocab_size, data_dir):
     if vocab_size == 0:
-        metrics_dir = DATA_CACHE_DIR
+        metrics_dir = data_dir
     else:
-        metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{vocab_size}")
+        metrics_dir = os.path.join(data_dir, f"metrics{vocab_size}")
 
+    # searching xx path
+    print(f"Searching {metrics_dir} for metrics files...")
     metrics_files = glob.glob(os.path.join(metrics_dir, "*_metrics.csv"))
 
     combined_df = pl.concat([pl.read_csv(f) for f in metrics_files])
-    combined_df.write_csv("out/tables/batch_metrics.csv")
-
-    # Optionally remove the shard metric CSVs
-    for f in metrics_files:
-        os.remove(f)
+    combined_df.write_csv(data_dir + "/batch_metrics.csv")
 
 
 def pretokenize(vocab_size):
@@ -225,12 +217,13 @@ def pretokenize(vocab_size):
 
     # process all the shards in a process pool
     fun = partial(process_shard, vocab_size=vocab_size)
-    # with ProcessPoolExecutor() as executor:
-    #     executor.map(fun, enumerate(shard_filenames))
-    for shard_id, shard in enumerate(shard_filenames):
-        process_shard((shard_id, shard), vocab_size)
+    with ProcessPoolExecutor() as executor:
+        executor.map(fun, enumerate(shard_filenames))
+    # alternatively, process shards sequentially
+    # for shard_id, shard in enumerate(shard_filenames):
+    #     process_shard((shard_id, shard), vocab_size)
 
-    merge_csvs(vocab_size)
+    merge_csvs(vocab_size, data_dir)
     print("Done.")
 
 
