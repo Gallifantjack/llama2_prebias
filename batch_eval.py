@@ -1,62 +1,126 @@
+import os
+import torch
+from model import Transformer, ModelArgs
 from tokenizer import Tokenizer
 import polars as pl
 from evaluators import evaluate_textual_metrics
-from tinystories import Task
-from train import max_seq_len, vocab_size, vocab_source
+from itertools import chain
+from visualize_sat_output import extract_checkpoint_number
 
-
+checkpoint_dir = "out/ckpt/"
 tokenizer_path = "tokenizer.model"
 expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
 
+metrics_csv_path = "data/TinyStories_all_data/batch_metrics.csv"
+# -----------------------------------------------------------------------------
+# test utilities
 
-# Evaluate a batch of text against the expected output
-def evaluate_batch(x, y, tokenizer_path):
+
+def load_model_from_checkpoint(checkpoint_file):
+    checkpoint_dict = torch.load(checkpoint_file, map_location="cpu")
+    # load batch info
+    batch_info = checkpoint_dict["batch_indices_trained"]
+    print(f'Batch indices trained on for checkpoint "{checkpoint_file}":')
+    print(batch_info)
+
+    model_args = ModelArgs(
+        **checkpoint_dict["model_args"]
+    )  # Adjusted this to match the test script
+    model = Transformer(model_args)
+
+    state_dict = checkpoint_dict["model"]
+    unwanted_prefix = "_orig_mod."
+    for k, v in list(state_dict.items()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix) :]] = state_dict.pop(k)
+
+    # load model state dict
+    model.load_state_dict(state_dict, strict=False)
+
+    return model, batch_info
+
+
+# -----------------------------------------------------------------------------
+# test function
+
+
+def evaluate_model(model, tokenizer_path):
+    x = torch.tensor([[1]], dtype=torch.long, device="cpu")
+    with torch.inference_mode():
+        y = model.generate(x, max_new_tokens=200, temperature=0.0)
+    pt_tokens = y[0].tolist()
     enc = Tokenizer(tokenizer_model=tokenizer_path)
-    batch_results = []
+    generated_text = enc.decode(pt_tokens)
 
-    for idx in range(x.size(0)):  # Assuming x is a batch of sequences
-        sequence = x[idx].tolist()
-        text = enc.decode(sequence)
-        metrics = evaluate_textual_metrics(text, expected_stdout.decode("utf-8"))
-        metrics["text"] = text
-        batch_results.append(metrics)
-
-    return batch_results
+    metrics = evaluate_textual_metrics(generated_text, expected_stdout.decode("utf-8"))
+    metrics["text"] = generated_text
+    return metrics
 
 
-# Main evaluation function
-def evaluate_all_batches(batch_size, device, tokenizer_path, **dataset_kwargs):
-    results = []
-    batch_count = 0  # Initialize the batch count
+def evaluate_all_checkpoints(checkpoint_dir, tokenizer_path, metrics_csv_path):
+    checkpoint_files = [
+        os.path.join(checkpoint_dir, file)
+        for file in os.listdir(checkpoint_dir)
+        if file.endswith(".pt")
+    ]
 
-    for x, y in Task.iter_batches(batch_size, device, **dataset_kwargs):
-        if batch_count == 10:  # Break after 10 batches
-            break
+    checkpoint_output_results = []
+    checkpoint_batch_results = pl.DataFrame()
 
-        print(f"Evaluating batch {len(results)//batch_size + 1}")
-        batch_results = evaluate_batch(x, y, tokenizer_path)
-        results.extend(batch_results)
+    df_metrics = pl.read_csv(metrics_csv_path)
+    # print first 5 rows
+    print(df_metrics.tail(5))
 
-        batch_count += 1  # Increment the batch count
+    for idx, checkpoint_file in enumerate(checkpoint_files):
+        print(f"Evaluating checkpoint {idx+1}/{len(checkpoint_files)}")
+        model, batch_info = load_model_from_checkpoint(checkpoint_file)
+        result = evaluate_model(model, tokenizer_path)
+        checkpoint_name = os.path.basename(
+            checkpoint_file
+        )  # Extracting just the filename
+        # get just the number
+        checkpoint_name = extract_checkpoint_number(checkpoint_name)
+        result[
+            "checkpoint_name"
+        ] = checkpoint_name  # Adding the checkpoint name to the checkpoint_output_results
+        checkpoint_output_results.append(result)
 
-    # Create a Polars DataFrame from results
-    df = pl.DataFrame(results)
+        # Ensure checkpoint_name is of string type
+        checkpoint_df = pl.DataFrame({"checkpoint_name": [checkpoint_name]})
 
-    # Save results to CSV using Polars
-    df.write_csv(f"out/tables/{split}_batch_summary.csv")  # Saving split-wise
+        # Filter the DataFrame to only include the batch indices we trained on
+        batch_info = list(
+            chain(*[tensor.tolist() for tensor in batch_info])
+        )  # flatten list of tensors
 
-    return results
+        print(batch_info)
+
+        df_filtered = df_metrics.filter(
+            df_metrics["global_idx"].is_in(batch_info)
+        )  # filter to only include batch indices we trained on
+
+        # Compute the mean for each column
+        batch_results = df_filtered.mean()
+        print(batch_results)
+
+        # Horizontally concatenate batch_results and checkpoint_df
+        batch_results = batch_results.hstack(checkpoint_df)
+
+        checkpoint_batch_results = checkpoint_batch_results.vstack(batch_results)
+        print(checkpoint_batch_results)
+
+    # Create a Polars DataFrame from checkpoint_output_results
+    output_df = pl.DataFrame(checkpoint_output_results)
+    output_df.write_csv("out/tables/summary.csv")
+    # Create a Polars DataFrame from checkpoint_batch_results
+    print(checkpoint_batch_results)
+    checkpoint_batch_results.write_csv("out/tables/batch_results.csv")
+
+    return print("Done!")
 
 
-# Run evaluation
+# -----------------------------------------------------------------------------
+# run evaluation
+
 if __name__ == "__main__":
-    batch_size = 16  # Adjust as needed
-    device = "cpu"  # Adjust as needed: "cuda" or "cpu"
-    dataset_kwargs = {}  # Provide necessary dataset arguments here
-
-    for split in ["train", "val", "test"]:
-        dataset_kwargs[
-            "split"
-        ] = split  # Assuming you might need the split in dataset_kwargs
-        evaluate_all_batches(batch_size, device, tokenizer_path, **dataset_kwargs)
-        print(f"Done with {split}!")
+    evaluate_all_checkpoints(checkpoint_dir, tokenizer_path, metrics_csv_path)

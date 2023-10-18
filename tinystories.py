@@ -25,6 +25,7 @@ import polars as pl
 
 
 DATA_CACHE_DIR = "data"
+max_shards = 1000000
 
 
 def download_file(url: str, fname: str, chunk_size=1024):
@@ -145,26 +146,21 @@ def process_shard(args, vocab_size):
 
     for idx, example in enumerate(tqdm(data, position=shard_id)):
         text = example["story"]
-
-        # Evaluate text using the Evaluator class functions
         batch_metric = evaluate_textual_metrics(text, expected_stdout)
-        batch_metric["batch_id"] = shard_id  # Adding the batch_id to the metrics
-        batch_metric["example_id"] = idx  # Adding an example_id
+        global_idx = (
+            shard_id * len(data) + idx
+        )  # Unique ID for each example across all shards
+        batch_metric["global_idx"] = global_idx
         batch_metrics.append(batch_metric)
-
-        text = text.strip()  # get rid of leading/trailing whitespace
-        tokens = enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
+        text = text.strip()
+        tokens = enc.encode(text, bos=True, eos=False)
         all_tokens.extend(tokens)
 
-    # convert to uint16 nparray
     all_tokens = np.array(all_tokens, dtype=np.uint16)
-    # calculate the output filename
-    if vocab_size == 0:
-        # if we're using Llama 2, just save the tokenized file in the same dir
-        tokenized_filename = shard.replace(".json", ".bin")
-        # Save the metrics in a csv file
-        metrics_filename = shard.replace(".json", "_metrics.csv")
 
+    if vocab_size == 0:
+        tokenized_filename = shard.replace(".json", ".bin")
+        metrics_filename = shard.replace(".json", "_metrics.csv")
     else:
         # save .bin files into a new tok{N} directory
         bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
@@ -179,14 +175,11 @@ def process_shard(args, vocab_size):
         metrics_basename = shard_basename.replace(".json", "_metrics.csv")
         metrics_filename = os.path.join(metrics_dir, metrics_basename)
 
-    # write the bytes
     with open(tokenized_filename, "wb") as f:
         f.write(all_tokens.tobytes())
-    # calculate the average sequence length (they are separated by BOS=1)
     avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
     print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
 
-    # Save the DataFrame to its own CSV file
     df_new = pl.DataFrame(batch_metrics)
     df_new.write_csv(metrics_filename)
     print(f"Saved {metrics_filename}")
@@ -202,8 +195,11 @@ def merge_csvs(vocab_size, data_dir):
     print(f"Searching {metrics_dir} for metrics files...")
     metrics_files = glob.glob(os.path.join(metrics_dir, "*_metrics.csv"))
 
+    # Filter out the batch_metrics.csv if it exists in the list
+    metrics_files = [f for f in metrics_files if not f.endswith("batch_metrics.csv")]
+
     combined_df = pl.concat([pl.read_csv(f) for f in metrics_files])
-    combined_df.write_csv(data_dir + "/batch_metrics.csv")
+    combined_df.write_csv(os.path.join(data_dir, "batch_metrics.csv"))
 
 
 def pretokenize(vocab_size):
@@ -237,6 +233,9 @@ class PretokDataset(torch.utils.data.IterableDataset):
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
 
+    def create_global_idx(self, shard_id, example_id):
+        return shard_id * 10**6 + example_id
+
     def __iter__(self):
         # get worker info within a DataLoader
         worker_info = torch.utils.data.get_worker_info()
@@ -247,6 +246,7 @@ class PretokDataset(torch.utils.data.IterableDataset):
         seed = 42 + worker_id + 1337 * rank
         rng = random.Random(seed)
         print(f"Created a PretokDataset with rng seed {seed}")
+
         if self.vocab_source == "llama2":
             # the .bin files are right along the .json files
             bin_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
@@ -273,11 +273,12 @@ class PretokDataset(torch.utils.data.IterableDataset):
                 for ix in ixs:
                     start = ix * self.max_seq_len
                     end = start + self.max_seq_len + 1
-                    # calling .astype will copy the data into a new numpy array, now in RAM
                     chunk = torch.from_numpy((m[start:end]).astype(np.int64))
                     x = chunk[:-1]
                     y = chunk[1:]
-                    yield x, y
+                    shard_id = shard_filenames.index(shard)
+                    global_ix = self.create_global_idx(shard_id, ix)
+                    yield x, y, global_ix
 
 
 # -----------------------------------------------------------------------------
@@ -303,10 +304,10 @@ class Task:
         dl = torch.utils.data.DataLoader(
             ds, batch_size=batch_size, pin_memory=True, num_workers=num_workers
         )
-        for x, y in dl:
+        for x, y, global_ix in dl:  # Unpack the batch index here
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
-            yield x, y
+            yield x, y, global_ix
 
 
 # -----------------------------------------------------------------------------

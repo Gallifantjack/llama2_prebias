@@ -75,6 +75,7 @@ device = (
 )
 dtype = "bfloat16"  # float32|bfloat16|float16
 compile = True  # use PyTorch 2.0 to compile the model to be faster
+batch_indices_trained = []
 # -----------------------------------------------------------------------------
 config_keys = [
     k
@@ -241,7 +242,7 @@ def estimate_loss():
         batch_iter = iter_batches(split=split)
         losses = torch.zeros(eval_iters)  # keep on CPU
         for k in range(eval_iters):
-            X, Y = next(batch_iter)
+            X, Y, global_ix = next(batch_iter)
             with ctx:
                 logits = model(X, Y)
                 loss = raw_model.last_loss
@@ -274,7 +275,8 @@ if wandb_log and master_process:
 
 # training loop
 train_batch_iter = iter_batches(split="train")
-X, Y = next(train_batch_iter)  # fetch the very first batch
+X, Y, global_ix = next(train_batch_iter)  # fetch the very first batch and its indices
+batch_indices_trained.append(global_ix)
 t0 = time.time()
 local_iter_num = 0  # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model  # unwrap DDP container if needed
@@ -316,6 +318,7 @@ while True:
                     "iter_num": iter_num,
                     "best_val_loss": best_val_loss,
                     "config": config,
+                    "batch_indices_trained": batch_indices_trained,
                 }
 
                 # Save attention weights
@@ -359,7 +362,7 @@ while True:
             loss = raw_model.last_loss
             loss = loss / gradient_accumulation_steps
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
-        X, Y = next(train_batch_iter)
+        X, Y, global_ix = next(train_batch_iter)
         # backward pass, with gradient scaling if training in fp16
         scaler.scale(loss).backward()
     # clip the gradient
@@ -394,6 +397,7 @@ while True:
 
     # termination conditions
     if iter_num > max_iters:
+        print(f"reached max_iters {max_iters}, terminating training")
         break
 
 if ddp:

@@ -63,7 +63,7 @@ def plot_metrics_from_csv(file_path):
     plt.tight_layout()
 
     # Save the plot
-    plt.savefig("out/visualize/sat_curves.png")
+    plt.savefig("out/visualize/sat/sat_curves_output.png")
 
 
 if __name__ == "__main__":
