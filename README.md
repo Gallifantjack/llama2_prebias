@@ -3,9 +3,11 @@
 Fork from llama2.c 
 
 ## Workpackages
-### 1. Dataset 
+### 1. Tinystories
 
-First we download tinystories dataset and tokenize it. 
+#### 1a. Download Dataset 
+
+First we download tinystories dataset. 
 
 ```bash
 python tinystories.py download
@@ -13,12 +15,19 @@ python tinystories.py download
 
 This creates a new folder called data in the root directory that contains 'TinyStories_all_data'.
 
-We then tokenize the dataset using sentencepiece tokenizer model
+#### 1b. Tokenize and Evaluate Batches
+
+We then tokenize the dataset using sentencepiece tokenizer model.
+This creates a .bin file in the data/TinyStories_all_data folder that contains the tokenized dataset.
 
 ```bash
 python tinystories.py pretokenize
 ```
-This creates a .bin file in the data/TinyStories_all_data folder that contains the tokenized dataset.
+
+During this process each shard is evaluated using metrics such as perplexity and sentence length. These are the same as what is used in model evaluation in 3.
+
+Batch metrics are stored in out/tables/batch_metrics.csv
+
 
 ### 2. Pretraining
 

@@ -18,9 +18,14 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
+from evaluators import evaluate_textual_metrics
+from eval import expected_stdout
 from tokenizer import Tokenizer
+import polars as pl
+
 
 DATA_CACHE_DIR = "data"
+
 
 def download_file(url: str, fname: str, chunk_size=1024):
     """Helper function to download a file from a given url"""
@@ -68,6 +73,7 @@ def download():
     print(f"Number of shards: {len(shard_filenames)}")
     print(f"Example story:\n{data[0]}")
 
+
 def train_vocab(vocab_size):
     """
     Trains a custom sentencepiece tokenizer on the TinyStories dataset.
@@ -100,19 +106,21 @@ def train_vocab(vocab_size):
 
     # 2) train the sentencepiece model
     print("Will now train the vocab...")
-    spm.SentencePieceTrainer.train(input=tiny_file,
-                                   model_prefix=prefix,
-                                   model_type="bpe",
-                                   vocab_size=vocab_size,
-                                   self_test_sample_size=0,
-                                   input_format="text",
-                                   character_coverage=1.0,
-                                   num_threads=os.cpu_count(),
-                                   split_digits=True,
-                                   allow_whitespace_only_pieces=True,
-                                   byte_fallback=True,
-                                   unk_surface=r" \342\201\207 ",
-                                   normalization_rule_name="identity")
+    spm.SentencePieceTrainer.train(
+        input=tiny_file,
+        model_prefix=prefix,
+        model_type="bpe",
+        vocab_size=vocab_size,
+        self_test_sample_size=0,
+        input_format="text",
+        character_coverage=1.0,
+        num_threads=os.cpu_count(),
+        split_digits=True,
+        allow_whitespace_only_pieces=True,
+        byte_fallback=True,
+        unk_surface=r" \342\201\207 ",
+        normalization_rule_name="identity",
+    )
 
     # 3) optional cleanup, ask the user if they'd like to delete tiny.txt
     dec = input(f"Delete the temporary file {tiny_file}? [y/N] ")
@@ -128,32 +136,82 @@ def process_shard(args, vocab_size):
     shard_id, shard = args
     tokenizer_model = get_tokenizer_model_path(vocab_size)
     enc = Tokenizer(tokenizer_model)
+
     with open(shard, "r") as f:
         data = json.load(f)
+
     all_tokens = []
-    for example in tqdm(data, position=shard_id):
+    batch_metrics = []
+
+    for idx, example in enumerate(tqdm(data, position=shard_id)):
+        if idx >= 5:  # Break after processing the first 5 examples
+            break
+
         text = example["story"]
+
+        # Evaluate text using the Evaluator class functions
+        batch_metric = evaluate_textual_metrics(text, expected_stdout)
+        batch_metric["batch_id"] = shard_id  # Adding the batch_id to the metrics
+        batch_metric["example_id"] = idx  # Adding an example_id
+        batch_metrics.append(batch_metric)
+        print(f"Metrics: {batch_metric}")
+
         text = text.strip()  # get rid of leading/trailing whitespace
         tokens = enc.encode(text, bos=True, eos=False)  # encode the text, use BOS
         all_tokens.extend(tokens)
+
     # convert to uint16 nparray
     all_tokens = np.array(all_tokens, dtype=np.uint16)
     # calculate the output filename
     if vocab_size == 0:
         # if we're using Llama 2, just save the tokenized file in the same dir
         tokenized_filename = shard.replace(".json", ".bin")
+        # Save the metrics in a csv file
+        metrics_filename = shard.replace(".json", "_metrics.csv")
+        print(metrics_filename)
+
     else:
         # save .bin files into a new tok{N} directory
         bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
         shard_basename = os.path.basename(shard)
         bin_basename = shard_basename.replace(".json", ".bin")
         tokenized_filename = os.path.join(bin_dir, bin_basename)
+
+        # Save CSV files into a new metrics{N} directory
+        metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{vocab_size}")
+        os.makedirs(metrics_dir, exist_ok=True)  # Ensure directory exists
+        shard_basename = os.path.basename(shard)
+        metrics_basename = shard_basename.replace(".json", "_metrics.csv")
+        metrics_filename = os.path.join(metrics_dir, metrics_basename)
+
     # write the bytes
     with open(tokenized_filename, "wb") as f:
         f.write(all_tokens.tobytes())
     # calculate the average sequence length (they are separated by BOS=1)
     avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
     print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
+
+    # Save the DataFrame to its own CSV file
+    print(f"Saving metrics to {metrics_filename}")
+    df_new = pl.DataFrame(batch_metrics)
+    df_new.write_csv(metrics_filename)
+    print(f"Saved {metrics_filename}")
+
+
+def merge_csvs(vocab_size):
+    if vocab_size == 0:
+        metrics_dir = DATA_CACHE_DIR
+    else:
+        metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{vocab_size}")
+
+    metrics_files = glob.glob(os.path.join(metrics_dir, "*_metrics.csv"))
+
+    combined_df = pl.concat([pl.read_csv(f) for f in metrics_files])
+    combined_df.write_csv("out/tables/batch_metrics.csv")
+
+    # Optionally remove the shard metric CSVs
+    for f in metrics_files:
+        os.remove(f)
 
 
 def pretokenize(vocab_size):
@@ -167,8 +225,12 @@ def pretokenize(vocab_size):
 
     # process all the shards in a process pool
     fun = partial(process_shard, vocab_size=vocab_size)
-    with ProcessPoolExecutor() as executor:
-        executor.map(fun, enumerate(shard_filenames))
+    # with ProcessPoolExecutor() as executor:
+    #     executor.map(fun, enumerate(shard_filenames))
+    for shard_id, shard in enumerate(shard_filenames):
+        process_shard((shard_id, shard), vocab_size)
+
+    merge_csvs(vocab_size)
     print("Done.")
 
 
@@ -201,8 +263,10 @@ class PretokDataset(torch.utils.data.IterableDataset):
             bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}")
             shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
         # train/test split. let's use only shard 0 for test split, rest train
-        shard_filenames = shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
-        assert len(shard_filenames)>0, f"No bin files found in {bin_dir}"
+        shard_filenames = (
+            shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
+        )
+        assert len(shard_filenames) > 0, f"No bin files found in {bin_dir}"
         while True:
             rng.shuffle(shard_filenames)
             for shard in shard_filenames:
@@ -222,8 +286,10 @@ class PretokDataset(torch.utils.data.IterableDataset):
                     y = chunk[1:]
                     yield x, y
 
+
 # -----------------------------------------------------------------------------
 # public interface functions
+
 
 def get_tokenizer_model_path(vocab_size):
     """
@@ -236,8 +302,8 @@ def get_tokenizer_model_path(vocab_size):
     else:
         return os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}.model")
 
-class Task:
 
+class Task:
     @staticmethod
     def iter_batches(batch_size, device, num_workers=0, **dataset_kwargs):
         ds = PretokDataset(**dataset_kwargs)
@@ -248,6 +314,7 @@ class Task:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
             yield x, y
+
 
 # -----------------------------------------------------------------------------
 # CLI for constructing the dataset
@@ -266,8 +333,15 @@ if __name__ == "__main__":
     python tinystories.py pretokenize --vocab_size=2048
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument("stage", type=str, choices=["download", "pretokenize", "train_vocab"])
-    parser.add_argument("--vocab_size", type=int, default=0, help="pretokenization vocab size. 0 = use Llama 2 tokenizer.")
+    parser.add_argument(
+        "stage", type=str, choices=["download", "pretokenize", "train_vocab"]
+    )
+    parser.add_argument(
+        "--vocab_size",
+        type=int,
+        default=0,
+        help="pretokenization vocab size. 0 = use Llama 2 tokenizer.",
+    )
     args = parser.parse_args()
 
     # depending on the stage call the appropriate function

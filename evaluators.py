@@ -20,6 +20,8 @@ class Evaluators:
         return perplexity
 
     def prevalence_of_word(self, word):
+        if not self.text:  # If text is empty
+            return 0
         return self.text.count(word) / len(self.text)
 
     def bias_flags(self):
@@ -29,8 +31,22 @@ class Evaluators:
     def sentence_length(self):
         return len(self.text)
 
-    def co_occurrence(self, word1, word2):
-        return int(word1 in self.text and word2 in self.text)
+    def co_occurrence(self, word1, word2, window_size=5):
+        count = 0
+        for i, word in enumerate(self.text):
+            if (
+                word == word1
+                and i + window_size < len(self.text)
+                and word2 in self.text[i + 1 : i + window_size + 1]
+            ):
+                count += 1
+            elif (
+                word == word2
+                and i + window_size < len(self.text)
+                and word1 in self.text[i + 1 : i + window_size + 1]
+            ):
+                count += 1
+        return count
 
     def all_metrics(self, reference):
         return {
@@ -46,4 +62,5 @@ class Evaluators:
 
 def evaluate_textual_metrics(decoded_text, reference):
     evaluator = Evaluators(decoded_text)
-    return evaluator.all_metrics(reference)
+    metrics = evaluator.all_metrics(reference)
+    return metrics
