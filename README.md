@@ -54,12 +54,16 @@ All plots are stored in out/visualize
 ```bash
 eval.py
 ```
-This loads the model and generates a sequence of 200 tokens. It then compares the generated sequence to the expected sequence and other metrics such as sentance length and ourputs the results to a csv file in out/tables.
+This loads the model and generates a sequence of 200 tokens. It then compares the generated sequence to the expected sequence and other metrics such as sentance length and outputs the results to a csv file in out/tables.
 
 
 ### 5. Saturation curves
-- plot each of the eval metrics against the number of training steps
+```bash
+python visualize_sat.py
+```
+This script takes the summary table produced in 3. and plots the normalised score for each metric against the number of training steps. 
 
+Plots are stored in out/visualize/sat_curves.png
 
 ## 6. Batch play
 - characterise each batch using same metrics as above 
