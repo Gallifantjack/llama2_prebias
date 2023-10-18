@@ -60,11 +60,14 @@ This takes the stored embeddings from each checkpoint and plots the embeddings u
 
 All plots are stored in out/visualize
 
-#### c. Output Evaluation
+#### c. input/output Evaluation
 ```bash
 python eval.py
 ```
-This loads the model and generates a sequence of 200 tokens. It then compares the generated sequence to the expected sequence and other metrics such as sentance length and outputs the results to a csv file in out/tables.
+To evaluate the output this loads the model and generates a sequence of 200 tokens. It then compares the generated sequence to the expected sequence and other metrics such as sentance length and outputs the results to a csv file in out/tables.
+
+For the batch metrics, these metrics were already calculated in stage 1b. This script just loads the table and adds the batch metrics of those batches used at a given checkpoint to a summary table.
+
 
 
 ### 4. Saturation curves
@@ -77,14 +80,7 @@ This script takes the summary table produced in 3. and plots the normalised scor
 Plots are stored in out/visualize/sat_curves_output.png
 
 #### b. Batch input curves
-##### i. Get batch metrics
-```bash
-python batch_eval.py
-```
 
-These metrics were already calculated in stage 1b. This script just loads the table and adds the batch metrics of those batches used at a given checkpoint to a summary table.
-
-##### ii. Plot batch metrics
 ```bash
 python visualize_sat_batch.py
 ```
