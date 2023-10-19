@@ -6,11 +6,13 @@ import polars as pl
 from evaluators import evaluate_textual_metrics
 from itertools import chain
 
+
+# Global constants
 checkpoint_dir = "out/ckpt/"
 tokenizer_path = "tokenizer.model"
 expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
-
 metrics_csv_path = "data/TinyStories_all_data/batch_metrics.csv"
+
 # -----------------------------------------------------------------------------
 # test utilities
 
@@ -65,65 +67,57 @@ def evaluate_model(model, tokenizer_path):
     return metrics
 
 
-def evaluate_all_checkpoints(checkpoint_dir, tokenizer_path, metrics_csv_path):
+def run_evaluation(checkpoint_directory, tokenizer_filepath, metrics_csv_filepath):
     checkpoint_files = [
-        os.path.join(checkpoint_dir, file)
-        for file in os.listdir(checkpoint_dir)
+        os.path.join(checkpoint_directory, file)
+        for file in os.listdir(checkpoint_directory)
         if file.endswith(".pt")
     ]
 
     checkpoint_output_results = []
     checkpoint_batch_results = pl.DataFrame()
 
-    df_metrics = pl.read_csv(metrics_csv_path)
-    # print first 5 rows
+    df_metrics = pl.read_csv(metrics_csv_filepath)
     print(df_metrics.tail(5))
 
     for idx, checkpoint_file in enumerate(checkpoint_files):
         print(f"Evaluating checkpoint {idx+1}/{len(checkpoint_files)}")
         model, batch_info = load_model_from_checkpoint(checkpoint_file)
-        result = evaluate_model(model, tokenizer_path)
-        checkpoint_name = os.path.basename(
-            checkpoint_file
-        )  # Extracting just the filename
-        # get just the number
+        result = evaluate_model(model, tokenizer_filepath)
+        checkpoint_name = os.path.basename(checkpoint_file)
         checkpoint_name = extract_checkpoint_number(checkpoint_name)
-        result[
-            "checkpoint_name"
-        ] = checkpoint_name  # Adding the checkpoint name to the checkpoint_output_results
+        result["checkpoint_name"] = checkpoint_name
         checkpoint_output_results.append(result)
 
-        # Ensure checkpoint_name is of string type
         checkpoint_df = pl.DataFrame({"checkpoint_name": [checkpoint_name]})
-
-        # Filter the DataFrame to only include the batch indices we trained on
-        batch_info = list(
-            chain(*[tensor.tolist() for tensor in batch_info])
-        )  # flatten list of tensors
-
-        df_filtered = df_metrics.filter(
-            df_metrics["global_idx"].is_in(batch_info)
-        )  # filter to only include batch indices we trained on
-
-        # Compute the mean for each column
+        batch_info = list(chain(*[tensor.tolist() for tensor in batch_info]))
+        df_filtered = df_metrics.filter(df_metrics["global_idx"].is_in(batch_info))
         batch_results = df_filtered.mean()
-        # Horizontally concatenate batch_results and checkpoint_df
         batch_results = batch_results.hstack(checkpoint_df)
-
         checkpoint_batch_results = checkpoint_batch_results.vstack(batch_results)
 
-    # Create a Polars DataFrame from checkpoint_output_results
-    output_df = pl.DataFrame(checkpoint_output_results)
-    output_df.write_csv("out/tables/summary.csv")
-    # Create a Polars DataFrame from checkpoint_batch_results
-    print(checkpoint_batch_results)
-    checkpoint_batch_results.write_csv("out/tables/batch_results.csv")
+    # Determine directory name for the checkpoint for output structure
+    checkpoint_dir_name = os.path.basename(os.path.normpath(checkpoint_directory))
 
-    return print("Done!")
+    # Save the summary results based on the checkpoint directory
+    summary_output_path = f"out/tables/{checkpoint_dir_name}/summary.csv"
+    if not os.path.exists(os.path.dirname(summary_output_path)):
+        os.makedirs(os.path.dirname(summary_output_path))
+    output_df = pl.DataFrame(checkpoint_output_results)
+    output_df.write_csv(summary_output_path)
+
+    # Save the batch results based on the checkpoint directory
+    batch_results_output_path = f"out/tables/{checkpoint_dir_name}/batch_results.csv"
+    if not os.path.exists(os.path.dirname(batch_results_output_path)):
+        os.makedirs(os.path.dirname(batch_results_output_path))
+    print(checkpoint_batch_results)
+    checkpoint_batch_results.write_csv(batch_results_output_path)
+
+    print("Evaluation Done!")
 
 
 # -----------------------------------------------------------------------------
 # run evaluation
 
 if __name__ == "__main__":
-    evaluate_all_checkpoints(checkpoint_dir, tokenizer_path, metrics_csv_path)
+    run_evaluation(checkpoint_dir, tokenizer_path, metrics_csv_path)

@@ -22,6 +22,7 @@ from evaluators import evaluate_textual_metrics
 from eval import expected_stdout
 from tokenizer import Tokenizer
 import polars as pl
+from torch.utils.data import Sampler
 
 
 DATA_CACHE_DIR = "data"
@@ -223,62 +224,76 @@ def pretokenize(vocab_size):
     print("Done.")
 
 
-class PretokDataset(torch.utils.data.IterableDataset):
+class PretokDataset(torch.utils.data.Dataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
-    def __init__(self, split, max_seq_len, vocab_size, vocab_source):
+    def __init__(
+        self, split, max_seq_len, vocab_size, vocab_source, predefined_order=None
+    ):
         super().__init__()
         self.split = split
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
+        self.predefined_order = predefined_order
+
+        # Initialize shard_filenames
+        if self.vocab_source == "llama2":
+            bin_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
+        elif self.vocab_source == "custom":
+            bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}")
+        else:
+            raise ValueError(f"Unknown vocab_source: {self.vocab_source}")
+        self.shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+        self.shard_filenames = (
+            self.shard_filenames[1:]
+            if self.split == "train"
+            else self.shard_filenames[:1]
+        )
+        assert len(self.shard_filenames) > 0, f"No bin files found in {bin_dir}"
+
+        # The order is either predefined or generated and shuffled
+        if predefined_order:
+            self.order = predefined_order
+        else:
+            self.order = self.generate_order(self.shard_filenames)
+            random.shuffle(self.order)
 
     def create_global_idx(self, shard_id, example_id):
         return shard_id * 10**6 + example_id
 
-    def __iter__(self):
-        # get worker info within a DataLoader
-        worker_info = torch.utils.data.get_worker_info()
-        worker_id = worker_info.id if worker_info else 0
-        # get DDP rank info
-        rank = dist.get_rank() if dist.is_initialized() else 0
-        # combine the worker_id and worker_rank to create a unique seed for rng
-        seed = 42 + worker_id + 1337 * rank
-        rng = random.Random(seed)
-        print(f"Created a PretokDataset with rng seed {seed}")
+    def __len__(self):
+        if self.predefined_order is not None:
+            return len(self.predefined_order)
+        return len(self.order)
 
-        if self.vocab_source == "llama2":
-            # the .bin files are right along the .json files
-            bin_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-        elif self.vocab_source == "custom":
-            # the .bin files are in tok{N} directory
-            bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}")
-            shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-        # train/test split. let's use only shard 0 for test split, rest train
-        shard_filenames = (
-            shard_filenames[1:] if self.split == "train" else shard_filenames[:1]
-        )
-        assert len(shard_filenames) > 0, f"No bin files found in {bin_dir}"
-        while True:
-            rng.shuffle(shard_filenames)
-            for shard in shard_filenames:
-                # open the dataset for reading but keep it on disk with memmap
-                m = np.memmap(shard, dtype=np.uint16, mode="r")
-                num_batches = len(m) // self.max_seq_len
-                num_batches -= 1  # drop the last partial batch
-                assert num_batches > 0, "this shard is way too small? investigate."
-                ixs = list(range(num_batches))
-                rng.shuffle(ixs)
-                for ix in ixs:
-                    start = ix * self.max_seq_len
-                    end = start + self.max_seq_len + 1
-                    chunk = torch.from_numpy((m[start:end]).astype(np.int64))
-                    x = chunk[:-1]
-                    y = chunk[1:]
-                    shard_id = shard_filenames.index(shard)
-                    global_ix = self.create_global_idx(shard_id, ix)
-                    yield x, y, global_ix
+    def generate_order(self, shard_filenames):
+        global_indices = []
+
+        for shard_id, shard in enumerate(shard_filenames):
+            m = np.memmap(shard, dtype=np.uint16, mode="r")
+            num_batches = len(m) // self.max_seq_len
+            num_batches -= 1  # drop the last partial batch
+            for ix in range(num_batches):
+                global_indices.append(self.create_global_idx(shard_id, ix))
+
+        return global_indices
+
+    def __getitem__(self, index):
+        global_ix = self.order[index]
+        shard_id = global_ix // (10**6)
+        ix = global_ix % (10**6)
+        shard = self.shard_filenames[shard_id]
+
+        m = np.memmap(shard, dtype=np.uint16, mode="r")
+        start = ix * self.max_seq_len
+        end = start + self.max_seq_len + 1
+
+        chunk = torch.from_numpy((m[start:end]).astype(np.int64))
+        x = chunk[:-1]
+        y = chunk[1:]
+
+        return x, y, global_ix
 
 
 # -----------------------------------------------------------------------------
@@ -299,16 +314,31 @@ def get_tokenizer_model_path(vocab_size):
 
 class Task:
     @staticmethod
-    def iter_batches(batch_size, device, num_workers=0, **dataset_kwargs):
-        ds = PretokDataset(**dataset_kwargs)
-        dl = torch.utils.data.DataLoader(
-            ds, batch_size=batch_size, pin_memory=True, num_workers=num_workers
+    def iter_batches(
+        split,
+        batch_size,
+        device,
+        predefined_order=None,
+        num_workers=0,
+        **dataset_kwargs,
+    ):
+        ds = PretokDataset(
+            split=split, predefined_order=predefined_order, **dataset_kwargs
         )
-        for x, y, global_ix in dl:  # Unpack the batch index here
+
+        shuffle_data = predefined_order is None
+
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_size=batch_size,
+            shuffle=shuffle_data,
+            pin_memory=True,
+            num_workers=num_workers,
+        )
+
+        for x, y, global_ix in dl:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
-            # debug print global_ix
-            print(global_ix)
             yield x, y, global_ix
 
 

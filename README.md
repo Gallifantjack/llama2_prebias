@@ -127,24 +127,20 @@ as in 2.
 ### 4. Saturation curves
 #### a. Output curves
 ```bash
-python visualize_sat_output.py
+python visualize_sat_curves.py
 ```
-This script takes the summary table produced in 3. and plots the normalised score for each metric against the number of training steps. 
+This script takes the summary table produced in 3. and the summarised batch metrics for each checkpoint and produces one plot with 2 subplots demonstrating the metrics over checkpoint.
 
-Plots are stored in out/visualize/sat_curves_output.png
+Plots are stored in out/visualize/batch_output_curves.png
 
 #### b. Batch input curves
 
 ```bash
 python visualize_sat_batch.py
 ```
-
-This script takes summarised batch metrics for each checkpoint and produces the same plot as in 4a.
-
 Plots are stored in out/visualize/sat_curves_batch.png
 
-## 6. Batch play
-- characterise each batch using same metrics as above 
+## 5. Batch play
 - play with sequencing 
 - add specific tag to seq for durability
 

@@ -47,17 +47,16 @@ def visualize_attention_from_checkpoint(checkpoint_path, save_path):
     plt.savefig(save_path)
 
 
-# Example usage
-checkpoint_dir = "out/ckpt/"
-checkpoints = [
-    os.path.join(checkpoint_dir, file)
-    for file in os.listdir(checkpoint_dir)
-    if file.endswith(".pt")
-]
+# checkpoint_dir = "out/ckpt/"
+# checkpoints = [
+#     os.path.join(checkpoint_dir, file)
+#     for file in os.listdir(checkpoint_dir)
+#     if file.endswith(".pt")
+# ]
 
-for idx, checkpoint_path in enumerate(checkpoints):
-    print(f"Processing checkpoint {idx+1}/{len(checkpoints)}")
-    save_path = f"out/visualize/attn/checkpoint_{idx+1}.png"
-    if not os.path.exists(os.path.dirname(save_path)):
-        os.makedirs(os.path.dirname(save_path))
-    visualize_attention_from_checkpoint(checkpoint_path, save_path)
+# for idx, checkpoint_path in enumerate(checkpoints):
+#     print(f"Processing checkpoint {idx+1}/{len(checkpoints)}")
+#     save_path = f"out/visualize/attn/checkpoint_{idx+1}.png"
+#     if not os.path.exists(os.path.dirname(save_path)):
+#         os.makedirs(os.path.dirname(save_path))
+#     visualize_attention_from_checkpoint(checkpoint_path, save_path)
