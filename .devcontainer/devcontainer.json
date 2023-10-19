@@ -24,7 +24,8 @@
 	"ms-vscode.cpptools-extension-pack",
 	"ms-vscode.cpptools",
 	"GrapeCity.gc-excelviewer",
-	"ms-python.isort"
+	"ms-python.isort",
+	"ms-toolsai.jupyter"
 ],
   "forwardPorts": [],
   "postCreateCommand": "",

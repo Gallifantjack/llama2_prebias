@@ -307,6 +307,8 @@ class Task:
         for x, y, global_ix in dl:  # Unpack the batch index here
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
+            # debug print global_ix
+            print(global_ix)
             yield x, y, global_ix
 
 
