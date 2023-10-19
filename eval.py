@@ -5,7 +5,6 @@ from tokenizer import Tokenizer
 import polars as pl
 from evaluators import evaluate_textual_metrics
 from itertools import chain
-from visualize_sat_output import extract_checkpoint_number
 
 checkpoint_dir = "out/ckpt/"
 tokenizer_path = "tokenizer.model"
@@ -38,6 +37,15 @@ def load_model_from_checkpoint(checkpoint_file):
     model.load_state_dict(state_dict, strict=False)
 
     return model, batch_info
+
+
+def extract_checkpoint_number(filename):
+    try:
+        # Updated extraction based on the 'ckpt_NUMBER.pt' format
+        return int(filename.split("ckpt_")[1].split(".pt")[0])
+    except IndexError:
+        print(f"Unexpected filename structure: {filename}")
+        return None
 
 
 # -----------------------------------------------------------------------------
@@ -93,21 +101,16 @@ def evaluate_all_checkpoints(checkpoint_dir, tokenizer_path, metrics_csv_path):
             chain(*[tensor.tolist() for tensor in batch_info])
         )  # flatten list of tensors
 
-        print(batch_info)
-
         df_filtered = df_metrics.filter(
             df_metrics["global_idx"].is_in(batch_info)
         )  # filter to only include batch indices we trained on
 
         # Compute the mean for each column
         batch_results = df_filtered.mean()
-        print(batch_results)
-
         # Horizontally concatenate batch_results and checkpoint_df
         batch_results = batch_results.hstack(checkpoint_df)
 
         checkpoint_batch_results = checkpoint_batch_results.vstack(batch_results)
-        print(checkpoint_batch_results)
 
     # Create a Polars DataFrame from checkpoint_output_results
     output_df = pl.DataFrame(checkpoint_output_results)

@@ -39,6 +39,39 @@ This creates a model.bin file in the root directory that contains the trained mo
 
 During this process the batch ids used in each checkpoint are stored in the checkpoint file.
 
+details>
+  <summary>Hardware usage</summary>
+
+##### Training config:
+- **Dataset**: tinystories
+- 
+- **Batch Size**: 32 (Micro-batch if gradient accumulation steps > 1)
+- **Sequence Length**: 128
+- **Vocabulary Size**: 32000 tokens
+
+- **Dimension**: 288
+- **Layers**: 6
+- **Heads**: 6
+
+- **Learning Rate**: 5e-4
+- **Total Training Iterations**: 34000
+- **Gradient Clipping**: 1.0
+
+- **Device**: cuda
+- **Data Type**: bfloat16
+
+##### Max Usage:
+- **CPU**: 1-2 core 100%
+- **GPU**: 100% 
+- **RAM**: <12GB
+- **VRAM**: <5GB
+- **Time**: ~30mins
+
+  
+</details>
+
+
+
 
 ### 3. Model Evaluation
 There are three main scripts for checkpoint evaluation:
@@ -68,6 +101,27 @@ To evaluate the output this loads the model and generates a sequence of 200 toke
 
 For the batch metrics, these metrics were already calculated in stage 1b. This script just loads the table and adds the batch metrics of those batches used at a given checkpoint to a summary table.
 
+details>
+  <summary>Hardware usage</summary>
+
+##### Hardware used:
+- **CPU**: intel i9 32 core
+- **GPU**: 1x RTX 4090 
+- **RAM**: 64GB
+- **VRAM**: 24GB
+
+##### Training config:
+as in 2.
+
+##### Max Usage:
+- **CPU**: 32 core 100%
+- **GPU**: 0% 
+- **RAM**: <8GB
+- **VRAM**: 0GB
+- **Time**: ~7mins
+
+  
+</details>
 
 
 ### 4. Saturation curves
@@ -96,6 +150,12 @@ Plots are stored in out/visualize/sat_curves_batch.png
 
 ## 6. Ideal Batch selection
 - ideal batch selection
+
+
+### Technical requirements
+
+
+
 
 
 ## TODO

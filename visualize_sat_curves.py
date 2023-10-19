@@ -22,29 +22,16 @@ def extract_checkpoint_number(filename):
         return None
 
 
-def plot_metrics_from_csv(file_path):
+def plot_metrics_from_csv(ax, file_path, name):
     # Load the CSV file into a Polars DataFrame
     df = pl.read_csv(file_path)
 
-    # Extract the checkpoint numbers
-    df = df.with_columns(
-        [
-            df["checkpoint_name"]
-            .map_elements(extract_checkpoint_number)
-            .alias("checkpoint_number")
-        ]
-    )
-
-    # Remove rows where checkpoint number extraction failed
-    df = df.filter(df["checkpoint_number"].is_not_null())
-
     # Sort the DataFrame by checkpoint number for a consistent progression in the plots
-    df = df.sort("checkpoint_number")
+    df = df.sort("checkpoint_name")
 
-    checkpoints = df["checkpoint_number"].to_list()
+    checkpoints = df["checkpoint_name"].to_list()
 
-    # Exclude certain columns from plotting
-    excluded_columns = ["checkpoint_name", "text", "checkpoint_number"]
+    excluded_columns = ["checkpoint_name", "text", "global_idx"]
 
     # Get the list of columns to plot
     metrics = [col for col in df.columns if col not in excluded_columns]
@@ -52,20 +39,27 @@ def plot_metrics_from_csv(file_path):
     # For each metric, normalize and plot
     for metric in metrics:
         normalized_values = normalize_data(df[metric].to_list())
-        plt.plot(checkpoints, normalized_values, label=metric)
+        ax.plot(checkpoints, normalized_values, label=metric)
 
     # Configure the plot
-    plt.title("Normalized Output Metrics over Checkpoints")
-    plt.xlabel("Checkpoint Number (Epochs)")
-    plt.ylabel("Normalized Score")
-    plt.legend(loc="upper left")
-    plt.grid(True)
-    plt.tight_layout()
-
-    # Save the plot
-    plt.savefig("out/visualize/sat/sat_curves_output.png")
+    ax.set_title(f"Normalized {name} Metrics over Checkpoints")
+    ax.set_xlabel("Checkpoint Number (Epochs)")
+    ax.set_ylabel("Normalized Score vs Max Score")
+    ax.legend(loc="upper left")
+    ax.grid(True)
 
 
 if __name__ == "__main__":
-    csv_file_path = "out/tables/summary.csv"
-    plot_metrics_from_csv(csv_file_path)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
+
+    # plot for output benchmarks
+    output_csv_file_path = "out/tables/summary.csv"
+    plot_metrics_from_csv(ax1, output_csv_file_path, "sat_curves_output")
+
+    # plot for batch benchmarks
+    batch_csv_file_path = "out/tables/batch_results.csv"
+    plot_metrics_from_csv(ax2, batch_csv_file_path, "sat_curves_batch")
+
+    plt.tight_layout()
+    plt.savefig("out/visualize/sat/batch_output_curves.png")
+    plt.close()
