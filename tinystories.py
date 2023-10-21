@@ -22,11 +22,11 @@ from evaluators import evaluate_textual_metrics
 from eval import expected_stdout
 from tokenizer import Tokenizer
 import polars as pl
+import pandas as pd
 from torch.utils.data import Sampler
 
 
 DATA_CACHE_DIR = "data"
-max_shards = 1000000
 
 
 def download_file(url: str, fname: str, chunk_size=1024):
@@ -145,12 +145,12 @@ def process_shard(args, vocab_size):
     all_tokens = []
     batch_metrics = []
 
+    MAX_EXAMPLES_PER_SHARD = 1e20
+
     for idx, example in enumerate(tqdm(data, position=shard_id)):
         text = example["story"]
         batch_metric = evaluate_textual_metrics(text, expected_stdout)
-        global_idx = (
-            shard_id * len(data) + idx
-        )  # Unique ID for each example across all shards
+        global_idx = shard_id * MAX_EXAMPLES_PER_SHARD + idx
         batch_metric["global_idx"] = global_idx
         batch_metrics.append(batch_metric)
         text = text.strip()
@@ -228,7 +228,13 @@ class PretokDataset(torch.utils.data.Dataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
     def __init__(
-        self, split, max_seq_len, vocab_size, vocab_source, predefined_order=None
+        self,
+        split,
+        max_seq_len,
+        vocab_size,
+        vocab_source,
+        predefined_order=None,
+        select_func=None,
     ):
         super().__init__()
         self.split = split
@@ -236,6 +242,7 @@ class PretokDataset(torch.utils.data.Dataset):
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
         self.predefined_order = predefined_order
+        self.select_func = select_func
 
         # Initialize shard_filenames
         if self.vocab_source == "llama2":
@@ -252,6 +259,19 @@ class PretokDataset(torch.utils.data.Dataset):
         )
         assert len(self.shard_filenames) > 0, f"No bin files found in {bin_dir}"
 
+        # Load metadata
+        if self.vocab_source == "llama2":
+            metrics_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
+        elif self.vocab_source == "custom":
+            metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{self.vocab_size}")
+        else:
+            raise ValueError(f"Unknown vocab_source: {self.vocab_source}")
+
+        self.metadata_df = pl.read_csv(os.path.join(metrics_dir, "batch_metrics.csv"))
+        assert (
+            "global_idx" in self.metadata_df.columns
+        ), "The metadata does not contain global_idx."
+
         # The order is either predefined or generated and shuffled
         if predefined_order:
             self.order = predefined_order
@@ -259,11 +279,20 @@ class PretokDataset(torch.utils.data.Dataset):
             self.order = self.generate_order(self.shard_filenames)
             random.shuffle(self.order)
 
+        if self.select_func:
+            # Assume select_func returns a list of selected global_idx values
+            selected_indices = self.select_func(self.metadata_df)
+            print(f"Selected {len(selected_indices)} indices.")
+            # Filter the order list to only contain selected global_idx values
+            selected_indices_set = set(selected_indices)
+            self.order = [idx for idx in self.order if idx in selected_indices_set]
+            print(f"Filtered order to {len(self.order)} indices.")
+
     def create_global_idx(self, shard_id, example_id):
         return shard_id * 10**6 + example_id
 
     def __len__(self):
-        if self.predefined_order is not None:
+        if self.predefined_order != None:
             return len(self.predefined_order)
         return len(self.order)
 
@@ -293,7 +322,35 @@ class PretokDataset(torch.utils.data.Dataset):
         x = chunk[:-1]
         y = chunk[1:]
 
-        return x, y, global_ix
+        # Fetch metadata for the current global_ix
+        filtered_df = self.metadata_df.filter(
+            self.metadata_df["global_idx"] == global_ix
+        )
+        metadata_row = filtered_df.head(1)
+        metadata = {
+            key: value.item() if isinstance(value, pl.series.series.Series) else value
+            for key, value in metadata_row.to_dict().items()
+        }
+
+        return x, y, global_ix, metadata
+
+
+def select_batches_from_sen_len(metadata):
+    # Sort by sentence length in descending order
+    metadata = metadata.sort("sentence_length", descending=True)
+
+    # Get the starting index for the top 50% of data
+    top_50_start_index = len(metadata) // 2
+
+    # Get global indices for the top 50%
+    top_50_indices = metadata["global_idx"][top_50_start_index:].to_list()
+
+    # Print the number of selected indices
+    print(
+        f"Selected {len(top_50_indices)} indices from top 50% based on sentence length."
+    )
+
+    return top_50_indices
 
 
 # -----------------------------------------------------------------------------
@@ -320,10 +377,14 @@ class Task:
         device,
         predefined_order=None,
         num_workers=0,
+        select_func=None,
         **dataset_kwargs,
     ):
         ds = PretokDataset(
-            split=split, predefined_order=predefined_order, **dataset_kwargs
+            split=split,
+            predefined_order=predefined_order,
+            select_func=select_func,
+            **dataset_kwargs,
         )
 
         shuffle_data = predefined_order is None
@@ -336,10 +397,10 @@ class Task:
             num_workers=num_workers,
         )
 
-        for x, y, global_ix in dl:
+        for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
-            yield x, y, global_ix
+            yield x, y, global_ix, metadata
 
 
 # -----------------------------------------------------------------------------
