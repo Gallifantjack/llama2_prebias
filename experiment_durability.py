@@ -34,12 +34,17 @@ def run_train_script(script_name, args=None):
 
 if __name__ == "__main__":
     # Different combinations of arguments
+
     argument_combinations = [
         [
             "--batch_selection",
             "sen_len",
             "--max_iters",
-            "200",
+            "1000",
+            "--eval_interval",
+            "100",
+            "--eval_iters",
+            "10",
             "--out_dir",
             "out/sen_len",
         ],
@@ -47,7 +52,11 @@ if __name__ == "__main__":
             "--batch_selection",
             "random",
             "--max_iters",
-            "200",
+            "1000",
+            "--eval_interval",
+            "100",
+            "--eval_iters",
+            "10",
             "--out_dir",
             "out/random",
         ],

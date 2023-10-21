@@ -41,7 +41,7 @@ def setup_args_and_run(**override_args):
 
     # General
     parser.add_argument("--out_dir", type=str, default="out", help="Output directory.")
-    parser.add_argument("--eval_interval", type=int, default=1000)
+    parser.add_argument("--eval_interval", type=int, default=2000)
     parser.add_argument("--log_interval", type=int, default=1)
     parser.add_argument("--eval_iters", type=int, default=100)
     parser.add_argument("--eval_only", action="store_true", default=False)
@@ -66,19 +66,12 @@ def setup_args_and_run(**override_args):
     )
 
     # data
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--max_seq_len", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=32)  # 128
+    parser.add_argument("--max_seq_len", type=int, default=128)  # 256
     parser.add_argument(
         "--vocab_source", type=str, choices=["llama2", "custom"], default="llama2"
     )
     parser.add_argument("--vocab_size", type=int, default=32000)
-    # Predefined_order or random
-    parser.add_argument(
-        "--predefined_order_file",
-        type=str,
-        help="Path to the file containing predefined order of indices",
-        default=None,
-    )
     parser.add_argument(
         "--batch_selection",
         type=str,
@@ -143,23 +136,6 @@ def setup_args_and_run(**override_args):
 
 
 def main(args):
-    # # Load configuration from a configurator.py file (if available)
-    # config_keys = [
-    #     k
-    #     for k, v in globals().items()
-    #     if not k.startswith("_") and isinstance(v, (int, float, bool, str))
-    # ]
-
-    # # If config_override is provided, use it. Otherwise, execute configurator.py.
-    # if args.config_override:
-    #     exec(
-    #         open(args.config_override).read()
-    #     )  # Overrides from the override config file
-    # else:
-    #     exec(open("configurator.py").read())  # Defaults
-
-    # config = {k: globals()[k] for k in config_keys}  # Useful for logging
-
     # Validate settings
     assert args.vocab_source in ["llama2", "custom"]
     assert (
@@ -286,6 +262,7 @@ def main(args):
         iter_num = checkpoint["iter_num"]
         best_val_loss = checkpoint["best_val_loss"]
     model.to(args.device)
+    print(next(model.parameters()).device)  # Should print something like cuda:0
 
     # initialize a GradScaler. If enabled=False scaler is a no-op
     scaler = torch.cuda.amp.GradScaler(enabled=(args.dtype == "float16"))
@@ -359,12 +336,10 @@ def train_model(
     tokens_per_iter,
     scaler,
     model_args,
-    predefined_order=None,
 ):
     # args
     train_iter_batches = partial(
         iter_batches,
-        predefined_order=predefined_order,
     )
     out_dir = args.out_dir
     eval_interval = args.eval_interval
@@ -380,6 +355,8 @@ def train_model(
     best_val_loss = args.best_val_loss
     iter_num = args.iter_num
 
+    print(f"Model is on: {args.device}")
+
     # functions
 
     # helps estimate an arbitrarily accurate loss over either split using many batches
@@ -388,7 +365,7 @@ def train_model(
         out = {}
         model.eval()
         for split in ["train", "val"]:
-            batch_iter = iter_batches(split=split, predefined_order=predefined_order)
+            batch_iter = iter_batches(split=split)
             losses = torch.zeros(args.eval_iters)  # keep on CPU
             for k in range(args.eval_iters):
                 X, Y, global_ix, metadata = next(batch_iter)
@@ -415,9 +392,7 @@ def train_model(
         return args.min_lr + coeff * (args.learning_rate - args.min_lr)
 
     batch_indices_trained = []
-    train_batch_iter = train_iter_batches(
-        split="train"
-    )  # Create the iterator with predefined_order
+    train_batch_iter = train_iter_batches(split="train")
 
     # Fetch the very first batch and its indices
     X, Y, global_ix, metadata = next(train_batch_iter)
@@ -557,4 +532,4 @@ def train_model(
 
 
 if __name__ == "__main__":
-    setup_args_and_run(batch_selection="sen_len")
+    setup_args_and_run(batch_selection="random")

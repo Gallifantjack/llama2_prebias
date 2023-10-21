@@ -27,6 +27,7 @@ from torch.utils.data import Sampler
 
 
 DATA_CACHE_DIR = "data"
+MAX_EXAMPLES_PER_SHARD = 1e20
 
 
 def download_file(url: str, fname: str, chunk_size=1024):
@@ -74,6 +75,10 @@ def download():
     print("Download done.")
     print(f"Number of shards: {len(shard_filenames)}")
     print(f"Example story:\n{data[0]}")
+
+
+def create_global_idx(shard_id, example_id):
+    return shard_id * MAX_EXAMPLES_PER_SHARD + example_id
 
 
 def train_vocab(vocab_size):
@@ -145,12 +150,10 @@ def process_shard(args, vocab_size):
     all_tokens = []
     batch_metrics = []
 
-    MAX_EXAMPLES_PER_SHARD = 1e20
-
     for idx, example in enumerate(tqdm(data, position=shard_id)):
         text = example["story"]
         batch_metric = evaluate_textual_metrics(text, expected_stdout)
-        global_idx = shard_id * MAX_EXAMPLES_PER_SHARD + idx
+        global_idx = create_global_idx(shard_id, idx)
         batch_metric["global_idx"] = global_idx
         batch_metrics.append(batch_metric)
         text = text.strip()
@@ -227,21 +230,12 @@ def pretokenize(vocab_size):
 class PretokDataset(torch.utils.data.Dataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
-    def __init__(
-        self,
-        split,
-        max_seq_len,
-        vocab_size,
-        vocab_source,
-        predefined_order=None,
-        select_func=None,
-    ):
+    def __init__(self, split, max_seq_len, vocab_size, vocab_source, select_func=None):
         super().__init__()
         self.split = split
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
-        self.predefined_order = predefined_order
         self.select_func = select_func
 
         # Initialize shard_filenames
@@ -272,28 +266,22 @@ class PretokDataset(torch.utils.data.Dataset):
             "global_idx" in self.metadata_df.columns
         ), "The metadata does not contain global_idx."
 
-        # The order is either predefined or generated and shuffled
-        if predefined_order:
-            self.order = predefined_order
-        else:
-            self.order = self.generate_order(self.shard_filenames)
+        self.order = self.generate_order(self.shard_filenames)
+        if not self.select_func:
             random.shuffle(self.order)
-
-        if self.select_func:
-            # Assume select_func returns a list of selected global_idx values
+        else:
             selected_indices = self.select_func(self.metadata_df)
             print(f"Selected {len(selected_indices)} indices.")
-            # Filter the order list to only contain selected global_idx values
             selected_indices_set = set(selected_indices)
-            self.order = [idx for idx in self.order if idx in selected_indices_set]
+            self.order = [
+                global_ix
+                for global_ix in self.order
+                if global_ix in selected_indices_set
+            ]
+
             print(f"Filtered order to {len(self.order)} indices.")
 
-    def create_global_idx(self, shard_id, example_id):
-        return shard_id * 10**6 + example_id
-
     def __len__(self):
-        if self.predefined_order != None:
-            return len(self.predefined_order)
         return len(self.order)
 
     def generate_order(self, shard_filenames):
@@ -304,19 +292,20 @@ class PretokDataset(torch.utils.data.Dataset):
             num_batches = len(m) // self.max_seq_len
             num_batches -= 1  # drop the last partial batch
             for ix in range(num_batches):
-                global_indices.append(self.create_global_idx(shard_id, ix))
+                global_indices.append(create_global_idx(shard_id, ix))
 
         return global_indices
 
     def __getitem__(self, index):
         global_ix = self.order[index]
-        shard_id = global_ix // (10**6)
-        ix = global_ix % (10**6)
+        shard_id = int(global_ix // MAX_EXAMPLES_PER_SHARD)
+        ix = int(global_ix) % (MAX_EXAMPLES_PER_SHARD)
         shard = self.shard_filenames[shard_id]
 
         m = np.memmap(shard, dtype=np.uint16, mode="r")
-        start = ix * self.max_seq_len
-        end = start + self.max_seq_len + 1
+
+        start = int(ix * self.max_seq_len)
+        end = int(start + self.max_seq_len + 1)
 
         chunk = torch.from_numpy((m[start:end]).astype(np.int64))
         x = chunk[:-1]
@@ -372,22 +361,12 @@ def get_tokenizer_model_path(vocab_size):
 class Task:
     @staticmethod
     def iter_batches(
-        split,
-        batch_size,
-        device,
-        predefined_order=None,
-        num_workers=0,
-        select_func=None,
-        **dataset_kwargs,
+        split, batch_size, device, num_workers=0, select_func=None, **dataset_kwargs
     ):
-        ds = PretokDataset(
-            split=split,
-            predefined_order=predefined_order,
-            select_func=select_func,
-            **dataset_kwargs,
-        )
+        ds = PretokDataset(split=split, select_func=select_func, **dataset_kwargs)
 
-        shuffle_data = predefined_order is None
+        # If select_func is provided, don't shuffle. Otherwise, shuffle the data.
+        shuffle_data = select_func is None
 
         dl = torch.utils.data.DataLoader(
             ds,
@@ -396,6 +375,7 @@ class Task:
             pin_memory=True,
             num_workers=num_workers,
         )
+        print(f"iter batches stage: {device}")
 
         for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
