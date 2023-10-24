@@ -7,9 +7,11 @@ import glob
 import json
 import os
 import random
+import itertools
 from typing import List
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
+import glob
 
 import numpy as np
 import requests
@@ -139,6 +141,14 @@ def train_vocab(vocab_size):
     print("Done.")
 
 
+# -----------------------------------------------------------------------------
+# Tokenization functions
+def create_global_idx(shard_id, idx):
+    # A simple method to create unique ID by combining shard_id and idx
+    # You can modify this function if needed.
+    return f"{shard_id}_{idx}"
+
+
 def process_shard(args, vocab_size):
     shard_id, shard = args
     tokenizer_model = get_tokenizer_model_path(vocab_size)
@@ -147,86 +157,129 @@ def process_shard(args, vocab_size):
     with open(shard, "r") as f:
         data = json.load(f)
 
-    all_tokens = []
-    batch_metrics = []
+    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
+    shard_basename = os.path.basename(shard)
+    bin_basename = shard_basename.replace(".json", ".bin")
+    tokenized_filename = os.path.join(bin_dir, bin_basename)
+    idx_basename = shard_basename.replace(".json", ".idx")
+    idx_filename = os.path.join(bin_dir, idx_basename)
 
-    for idx, example in enumerate(tqdm(data, position=shard_id)):
-        text = example["story"]
-        batch_metric = evaluate_textual_metrics(text, expected_stdout)
-        global_idx = create_global_idx(shard_id, idx)
-        batch_metric["global_idx"] = global_idx
-        batch_metrics.append(batch_metric)
-        text = text.strip()
-        tokens = enc.encode(text, bos=True, eos=False)
-        all_tokens.extend(tokens)
+    with open(tokenized_filename, "wb") as f, open(idx_filename, "w") as idx_file:
+        for example in tqdm(data, position=shard_id):
+            global_idx = create_global_idx(shard_id, data.index(example))
+            tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
+            token_length = len(tokens)
 
-    all_tokens = np.array(all_tokens, dtype=np.uint16)
+            # Write tokenized data to binary file
+            f.write(np.array(tokens, dtype=np.uint16).tobytes())
 
-    if vocab_size == 0:
-        tokenized_filename = shard.replace(".json", ".bin")
-        metrics_filename = shard.replace(".json", "_metrics.csv")
-    else:
-        # save .bin files into a new tok{N} directory
-        bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-        shard_basename = os.path.basename(shard)
-        bin_basename = shard_basename.replace(".json", ".bin")
-        tokenized_filename = os.path.join(bin_dir, bin_basename)
-
-        # Save CSV files into a new metrics{N} directory
-        metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{vocab_size}")
-        os.makedirs(metrics_dir, exist_ok=True)  # Ensure directory exists
-        shard_basename = os.path.basename(shard)
-        metrics_basename = shard_basename.replace(".json", "_metrics.csv")
-        metrics_filename = os.path.join(metrics_dir, metrics_basename)
-
-    with open(tokenized_filename, "wb") as f:
-        f.write(all_tokens.tobytes())
-    avg_seq_len = all_tokens.size / ((all_tokens == 1).sum())
-    print(f"Saved {tokenized_filename}, average seqlen: {avg_seq_len:.2f}")
-
-    df_new = pl.DataFrame(batch_metrics)
-    df_new.write_csv(metrics_filename)
-    print(f"Saved {metrics_filename}")
-
-
-def merge_csvs(vocab_size, data_dir):
-    if vocab_size == 0:
-        metrics_dir = data_dir
-    else:
-        metrics_dir = os.path.join(data_dir, f"metrics{vocab_size}")
-
-    # searching xx path
-    print(f"Searching {metrics_dir} for metrics files...")
-    metrics_files = glob.glob(os.path.join(metrics_dir, "*_metrics.csv"))
-
-    # Filter out the batch_metrics.csv if it exists in the list
-    metrics_files = [f for f in metrics_files if not f.endswith("batch_metrics.csv")]
-
-    combined_df = pl.concat([pl.read_csv(f) for f in metrics_files])
-    combined_df.write_csv(os.path.join(data_dir, "batch_metrics.csv"))
+            # Write global_idx and token_length to idx file
+            idx_file.write(f"{global_idx},{token_length}\n")
 
 
 def pretokenize(vocab_size):
-    # iterate the shards and tokenize all of them one by one
     data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
     shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
-    if vocab_size > 0:
-        # .bin files will be saved into tok{N} directory, create it once here
-        bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-        os.makedirs(bin_dir, exist_ok=True)
 
-    # process all the shards in a process pool
+    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
+    os.makedirs(bin_dir, exist_ok=True)
+
     fun = partial(process_shard, vocab_size=vocab_size)
     with ProcessPoolExecutor() as executor:
         executor.map(fun, enumerate(shard_filenames))
-    # alternatively, process shards sequentially
-    # for shard_id, shard in enumerate(shard_filenames):
-    #     process_shard((shard_id, shard), vocab_size)
 
-    merge_csvs(vocab_size, data_dir)
     print("Done.")
 
 
+# -----------------------------------------------------------------------------
+# Metadata functions
+
+
+def detokenize_from_bin(bin_file, idx_file, tokenizer_path):
+    enc = Tokenizer(tokenizer_model=tokenizer_path)
+
+    texts = []
+    global_ids = []
+
+    with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
+        for line in idx:
+            global_id, token_length = line.strip().split(",")
+            token_length = int(token_length)
+            tokens = np.frombuffer(
+                f.read(token_length * 2), dtype=np.uint16
+            )  # Read 2 bytes for each token
+
+            # Convert numpy array to list before decoding
+            decoded_text = enc.decode(tokens.tolist())
+
+            texts.append(decoded_text)
+            global_ids.append(global_id)
+
+    return texts, global_ids
+
+
+def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
+    idx_file = bin_file.replace(".bin", ".idx")
+    detokenized_texts, global_indices = detokenize_from_bin(
+        bin_file, idx_file, tokenizer_path
+    )
+
+    shard_metrics = []
+    for idx, detokenized_text in enumerate(detokenized_texts):
+        metrics = evaluate_textual_metrics(
+            detokenized_text, expected_stdout.decode("utf-8")
+        )
+        metrics["global_id"] = global_indices[idx]  # Attach global_id to the metrics
+        shard_metrics.append(metrics)
+
+    shard_name = os.path.basename(bin_file).replace(".bin", "")
+    shard_metrics_output_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_{shard_name}.csv"
+    )
+    pl.DataFrame(shard_metrics).write_csv(shard_metrics_output_path)
+
+    return shard_metrics_output_path
+
+
+def compute_metadata(vocab_size):
+    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
+    bin_files = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+    tokenizer_path = get_tokenizer_model_path(vocab_size)
+
+    # Parallelize the processing of each shard
+    with ProcessPoolExecutor() as executor:
+        shard_metric_files = list(
+            executor.map(
+                compute_shard_metrics,
+                bin_files,
+                itertools.repeat(tokenizer_path, len(bin_files)),
+                itertools.repeat(vocab_size, len(bin_files)),
+            )
+        )
+
+    print(f"Processed all shards for vocab size: {vocab_size}")
+
+    # Concatenate the computed shard metrics at the end
+    concatenate_shards(vocab_size)
+
+
+def concatenate_shards(vocab_size):
+    # Pattern to match all shard metric files
+    pattern = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_*.csv")
+    shard_files = sorted(glob.glob(pattern))
+
+    all_metrics = [pl.read_csv(file) for file in shard_files]
+    overall_metrics_df = pl.concat(all_metrics, how="vertical")
+
+    overall_metrics_output_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv"
+    )
+    overall_metrics_df.write_csv(overall_metrics_output_path)
+    print(f"Saved overall metadata results to {overall_metrics_output_path}")
+
+
+# -----------------------------------------------------------------------------
+# Dataset class
 class PretokDataset(torch.utils.data.Dataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
@@ -236,7 +289,6 @@ class PretokDataset(torch.utils.data.Dataset):
         self.max_seq_len = max_seq_len
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
-        self.select_func = select_func
 
         # Initialize shard_filenames
         if self.vocab_source == "llama2":
@@ -255,51 +307,50 @@ class PretokDataset(torch.utils.data.Dataset):
 
         # Load metadata
         if self.vocab_source == "llama2":
-            metrics_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
+            metrics_dir = os.path.join(DATA_CACHE_DIR, "tok0")
         elif self.vocab_source == "custom":
             metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{self.vocab_size}")
         else:
             raise ValueError(f"Unknown vocab_source: {self.vocab_source}")
 
-        self.metadata_df = pl.read_csv(os.path.join(metrics_dir, "batch_metrics.csv"))
+        self.metadata_df = pl.read_csv(
+            os.path.join(metrics_dir, "overall_metadata_for_vocab_0.csv")
+        )
         assert (
-            "global_idx" in self.metadata_df.columns
+            "global_id" in self.metadata_df.columns
         ), "The metadata does not contain global_idx."
 
-        self.order = self.generate_order(self.shard_filenames)
-        if not self.select_func:
-            random.shuffle(self.order)
-        else:
-            selected_indices = self.select_func(self.metadata_df)
-            print(f"Selected {len(selected_indices)} indices.")
-            selected_indices_set = set(selected_indices)
-            self.order = [
-                global_ix
-                for global_ix in self.order
-                if global_ix in selected_indices_set
-            ]
+        df_dict = self.metadata_df.to_dict(as_series=False)
+        global_idx_values = df_dict.pop(
+            "global_id"
+        )  # remove global_idx from dict and get its values
 
-            print(f"Filtered order to {len(self.order)} indices.")
+        # Construct metadata_dict where global_idx serves as the key
+        self.metadata_dict = {
+            idx: {key: df_dict[key][i] for key in df_dict}
+            for i, idx in enumerate(global_idx_values)
+        }
+
+        # Construct the order
+        self.order = self._construct_order()
+
+    def _construct_order(self):
+        """Construct the order based on shard filenames and other details."""
+        return generate_global_order(self.shard_filenames, self.max_seq_len)
 
     def __len__(self):
         return len(self.order)
 
-    def generate_order(self, shard_filenames):
-        global_indices = []
-
-        for shard_id, shard in enumerate(shard_filenames):
-            m = np.memmap(shard, dtype=np.uint16, mode="r")
-            num_batches = len(m) // self.max_seq_len
-            num_batches -= 1  # drop the last partial batch
-            for ix in range(num_batches):
-                global_indices.append(create_global_idx(shard_id, ix))
-
-        return global_indices
-
     def __getitem__(self, index):
-        global_ix = self.order[index]
-        shard_id = int(global_ix // MAX_EXAMPLES_PER_SHARD)
-        ix = int(global_ix) % (MAX_EXAMPLES_PER_SHARD)
+        global_ix = self.order[int(index)]
+
+        # Split the string on the underscore
+        shard_str, row_str = global_ix.split("_")
+
+        # Convert the shard string and row string to integers
+        shard_id = int(shard_str)
+        ix = int(row_str)
+
         shard = self.shard_filenames[shard_id]
 
         m = np.memmap(shard, dtype=np.uint16, mode="r")
@@ -311,39 +362,98 @@ class PretokDataset(torch.utils.data.Dataset):
         x = chunk[:-1]
         y = chunk[1:]
 
-        # Fetch metadata for the current global_ix
-        filtered_df = self.metadata_df.filter(
-            self.metadata_df["global_idx"] == global_ix
-        )
-        metadata_row = filtered_df.head(1)
-        metadata = {
-            key: value.item() if isinstance(value, pl.series.series.Series) else value
-            for key, value in metadata_row.to_dict().items()
-        }
+        # Fetch metadata for the current global_ix using the dictionary
+        metadata = self.metadata_dict.get(global_ix, {})
 
         return x, y, global_ix, metadata
 
 
-def select_batches_from_sen_len(metadata):
-    # Sort by sentence length in descending order
-    metadata = metadata.sort("sentence_length", descending=True)
+class DynamicSampler(torch.utils.data.Sampler):
+    def __init__(self, dataset, select_func=None):
+        self.dataset = dataset
+        self.select_func = select_func
+        self.order = self.generate_order()
 
-    # Get the starting index for the top 50% of data
-    top_50_start_index = len(metadata) // 2
+        if self.select_func:
+            selected_indices = self.select_func(dataset.metadata_df)
+            print(f"Selected {len(selected_indices)} indices.")
+            print(f"First few selected indices: {selected_indices[:10]}")
 
-    # Get global indices for the top 50%
-    top_50_indices = metadata["global_idx"][top_50_start_index:].to_list()
+            selected_indices_set = set(selected_indices)
+            self.order = [
+                global_ix
+                for global_ix in self.order
+                if global_ix in selected_indices_set
+            ]
 
-    # Print the number of selected indices
-    print(
-        f"Selected {len(top_50_indices)} indices from top 50% based on sentence length."
-    )
+    def __len__(self):
+        return len(self.order)
 
-    return top_50_indices
+    def __iter__(self):
+        return iter(self.order)
+
+    def generate_order(self):
+        """Construct the order based on shard filenames and other details."""
+        return generate_global_order(
+            self.dataset.shard_filenames, self.dataset.max_seq_len
+        )
+
+
+def generate_global_order(shard_filenames, max_seq_len):
+    global_indices = []
+    for shard_id, shard in enumerate(shard_filenames):
+        m = np.memmap(shard, dtype=np.uint16, mode="r")
+        num_batches = len(m) // max_seq_len
+        num_batches -= 1  # drop the last partial batch
+        for ix in range(num_batches):
+            global_indices.append(create_global_idx(shard_id, ix))
+    return global_indices
+
+
+def select_batches_sorted_by_column(metadata, column_name, ascending=True):
+    # Use polars to sort the metadata by the column
+    metadata_sorted = metadata.sort(column_name, descending=not ascending)
+
+    # Get the correct column position for "global_idx"
+    global_idx_position = metadata_sorted.columns.index("global_id")
+
+    # Extract the global_idx column values.
+    sorted_indices = [row[global_idx_position] for row in metadata_sorted.rows()]
+
+    return sorted_indices
 
 
 # -----------------------------------------------------------------------------
 # public interface functions
+
+
+class Task:
+    @staticmethod
+    def iter_batches(
+        split, batch_size, device, num_workers=0, select_func=None, **dataset_kwargs
+    ):
+        ds = PretokDataset(split=split, **dataset_kwargs)
+
+        # If select_func is provided, don't shuffle. Otherwise, shuffle the data.
+        sampler = DynamicSampler(ds, select_func=select_func)
+
+        dl = torch.utils.data.DataLoader(
+            ds,
+            batch_size=batch_size,
+            sampler=sampler,
+            pin_memory=True,
+            num_workers=num_workers,
+        )
+        print(f"iter batches stage: {device}")
+
+        for x, y, global_ix, metadata in dl:
+            x = x.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True)
+            print(x)
+            print(y)
+            print(global_ix)
+            print(metadata)
+            yield x, y, global_ix, metadata
 
 
 def get_tokenizer_model_path(vocab_size):
@@ -356,31 +466,6 @@ def get_tokenizer_model_path(vocab_size):
         return None
     else:
         return os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}.model")
-
-
-class Task:
-    @staticmethod
-    def iter_batches(
-        split, batch_size, device, num_workers=0, select_func=None, **dataset_kwargs
-    ):
-        ds = PretokDataset(split=split, select_func=select_func, **dataset_kwargs)
-
-        # If select_func is provided, don't shuffle. Otherwise, shuffle the data.
-        shuffle_data = select_func is None
-
-        dl = torch.utils.data.DataLoader(
-            ds,
-            batch_size=batch_size,
-            shuffle=shuffle_data,
-            pin_memory=True,
-            num_workers=num_workers,
-        )
-        print(f"iter batches stage: {device}")
-
-        for x, y, global_ix, metadata in dl:
-            x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
-            yield x, y, global_ix, metadata
 
 
 # -----------------------------------------------------------------------------
@@ -401,7 +486,9 @@ if __name__ == "__main__":
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "stage", type=str, choices=["download", "pretokenize", "train_vocab"]
+        "stage",
+        type=str,
+        choices=["download", "pretokenize", "train_vocab", "compute_metadata"],
     )
     parser.add_argument(
         "--vocab_size",
@@ -418,5 +505,7 @@ if __name__ == "__main__":
         train_vocab(vocab_size=args.vocab_size)
     elif args.stage == "pretokenize":
         pretokenize(vocab_size=args.vocab_size)
+    elif args.stage == "compute_metadata":
+        compute_metadata(vocab_size=args.vocab_size)
     else:
         raise ValueError(f"Unknown stage {args.stage}")

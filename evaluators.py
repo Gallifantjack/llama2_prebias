@@ -1,63 +1,91 @@
-from nltk.translate.bleu_score import sentence_bleu
-from collections import Counter
+from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+from textstat import flesch_kincaid_grade, gunning_fog
+from textblob import TextBlob
+
+PROFANITIES = set(["prison", "hate"])
 
 
 class Evaluators:
     def __init__(self, decoded_text):
-        self.text = decoded_text.split()
+        if not decoded_text:
+            # Default values for empty text
+            print("Empty text")
+            self.text = []
+        else:
+            self.text = decoded_text.split()
 
     def bleu_score(self, reference):
-        return sentence_bleu([reference.split()], self.text)
+        try:
+            smoothing = SmoothingFunction().method1
+            return sentence_bleu(
+                [reference.split()], self.text, smoothing_function=smoothing
+            )
+        except Exception as e:
+            print(f"Error computing BLEU score: {str(e)}")  # Log the error
+            return 0.0
 
-    def word_perplexity(self):
-        word_freq = Counter(self.text)
-        perplexity = sum(
-            [
-                -word_freq[word] / len(self.text) * (word_freq[word] / len(self.text))
-                for word in set(self.text)
-            ]
-        )
-        return perplexity
+    def flesch_kincaid_grade(self):
+        try:
+            return flesch_kincaid_grade(" ".join(self.text))
+        except Exception as e:
+            print(f"Error computing Flesch-Kincaid grade: {str(e)}")  # Log the error
+            return 0.0
 
-    def prevalence_of_word(self, word):
-        if not self.text:  # If text is empty
-            return 0
-        return self.text.count(word) / len(self.text)
+    def gunning_fog(self):
+        try:
+            return gunning_fog(" ".join(self.text))
+        except Exception as e:
+            print(f"Error computing Gunning Fog index: {str(e)}")  # Log the error
+            return 0.0
 
-    def bias_flags(self):
-        biases = ["Cat", "Dog"]
-        return sum([self.text.count(bias) for bias in biases])
+    def vocabulary_diversity(self):
+        try:
+            total_tokens = len(self.text)
+            unique_tokens = len(set(self.text))
+            return unique_tokens / total_tokens if total_tokens else 0
+        except Exception as e:
+            print(f"Error computing vocabulary diversity: {str(e)}")  # Log the error
+            return 0.0
 
-    def sentence_length(self):
-        return len(self.text)
+    def subjectivity_score(self):
+        try:
+            blob = TextBlob(" ".join(self.text))
+            return blob.sentiment.subjectivity
+        except Exception as e:
+            print(f"Error computing subjectivity score: {str(e)}")  # Log the error
+            return 0.0
 
-    def co_occurrence(self, word1, word2, window_size=5):
-        count = 0
-        for i, word in enumerate(self.text):
-            if (
-                word == word1
-                and i + window_size < len(self.text)
-                and word2 in self.text[i + 1 : i + window_size + 1]
-            ):
-                count += 1
-            elif (
-                word == word2
-                and i + window_size < len(self.text)
-                and word1 in self.text[i + 1 : i + window_size + 1]
-            ):
-                count += 1
-        return count
+    def sentiment_score(self):
+        try:
+            blob = TextBlob(" ".join(self.text))
+            return blob.sentiment.polarity
+        except Exception as e:
+            print(f"Error computing sentiment score: {str(e)}")  # Log the error
+            return 0.0
+
+    def profanity_check(self):
+        try:
+            return (
+                sum(1 for word in self.text if word.lower() in PROFANITIES)
+                / len(self.text)
+                if self.text
+                else 0
+            )
+        except Exception as e:
+            print(f"Error computing profanity check: {str(e)}")  # Log the error
+            return 0.0
 
     def all_metrics(self, reference):
-        return {
+        metrics = {
             "bleu_score": self.bleu_score(reference),
-            "prevalence_the": self.prevalence_of_word("the"),
-            "prevalence_and": self.prevalence_of_word("and"),
-            "sentence_length": self.sentence_length(),
-            "word_perplexity": self.word_perplexity(),
-            "bias_flags": self.bias_flags(),
-            "co_occurrence_example": self.co_occurrence("Lilly", "Dog"),
+            "flesch_kincaid_grade": self.flesch_kincaid_grade(),
+            "gunning_fog": self.gunning_fog(),
+            "vocabulary_diversity": self.vocabulary_diversity(),
+            "subjectivity_score": self.subjectivity_score(),
+            "sentiment_score": self.sentiment_score(),
+            "profanity_check": self.profanity_check(),
         }
+        return metrics
 
 
 def evaluate_textual_metrics(decoded_text, reference):

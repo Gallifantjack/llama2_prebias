@@ -11,7 +11,7 @@ from itertools import chain
 checkpoint_dir = "out/ckpt/"
 tokenizer_path = "tokenizer.model"
 expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
-metrics_csv_path = "data/TinyStories_all_data/batch_metrics.csv"
+metrics_csv_path = "data/tok0/overall_metadata_for_vocab_0.csv"
 
 # -----------------------------------------------------------------------------
 # test utilities

@@ -29,7 +29,7 @@ from model import Transformer, ModelArgs
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from tinystories import Task, select_batches_from_sen_len
+from tinystories import Task, select_batches_sorted_by_column
 from export import model_export
 
 # -----------------------------------------------------------------------------
@@ -72,12 +72,27 @@ def setup_args_and_run(**override_args):
         "--vocab_source", type=str, choices=["llama2", "custom"], default="llama2"
     )
     parser.add_argument("--vocab_size", type=int, default=32000)
+
+    # batch selection
     parser.add_argument(
         "--batch_selection",
         type=str,
-        choices=["random", "sen_len"],
+        choices=["random", "sort_column"],
         default="random",
         help="How to select batches from the dataset",
+    )
+    parser.add_argument(
+        "--sort_by_column",
+        type=str,
+        default=None,
+        help="Column name to sort by if batch_selection is set to sort_column",
+    )
+    parser.add_argument(
+        "--sort_by_direction",
+        type=str,
+        default="asc",
+        choices=["asc", "desc"],
+        help="Sort direction if batch_selection is set to sort_column",
     )
 
     # model
@@ -196,8 +211,24 @@ def main(args):
     )
 
     # -----------------------------------------------------------------------------
+    # Batch selection
+    def get_select_func(selection_strategy, sort_column=None, sort_direction="asc"):
+        if selection_strategy == "sort_column" and sort_column:
+            ascending = True if sort_direction == "asc" else False
+            return partial(
+                select_batches_sorted_by_column,
+                column_name=sort_column,
+                ascending=ascending,
+            )
+        else:
+            return None  # default
 
-    # Task-specific setup
+    select_function = get_select_func(
+        args.batch_selection, args.sort_by_column, args.sort_by_direction
+    )
+
+    # -----------------------------------------------------------------------------
+
     iter_batches = partial(
         Task.iter_batches,
         batch_size=args.batch_size,
@@ -206,9 +237,7 @@ def main(args):
         vocab_source=args.vocab_source,
         device=args.device,
         num_workers=0,
-        select_func=select_batches_from_sen_len
-        if args.batch_selection == "sen_len"
-        else None,
+        select_func=select_function,
     )
 
     # -----------------------------------------------------------------------------
@@ -408,7 +437,7 @@ def train_model(
         for param_group in optimizer.param_groups:
             param_group["lr"] = lr
 
-        # evaluate the loss on train/val sets and write checkpoints
+        # evaluate the loss on train/val sets andf write checkpoints
         if iter_num % eval_interval == 0 and args.master_process:
             losses = estimate_loss()
             print(
@@ -532,4 +561,4 @@ def train_model(
 
 
 if __name__ == "__main__":
-    setup_args_and_run(batch_selection="random")
+    setup_args_and_run()

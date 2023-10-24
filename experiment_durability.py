@@ -36,31 +36,78 @@ if __name__ == "__main__":
     # Different combinations of arguments
 
     argument_combinations = [
+        # Sentence length - Ascending
         [
             "--batch_selection",
-            "sen_len",
+            "sort_column",
+            "--sort_by_column",
+            "flesch_kincaid_grade",
+            "--sort_by_direction",
+            "asc",
             "--max_iters",
-            "1000",
+            "10000",
             "--eval_interval",
-            "100",
+            "1000",
             "--eval_iters",
-            "10",
+            "100",
             "--out_dir",
-            "out/sen_len",
+            "out/flesch_kincaid_asc",
         ],
+        # Sentence length - Descending
         [
             "--batch_selection",
-            "random",
+            "sort_column",
+            "--sort_by_column",
+            "flesch_kincaid_grade",
+            "--sort_by_direction",
+            "desc",
             "--max_iters",
-            "1000",
+            "10000",
             "--eval_interval",
-            "100",
+            "1000",
             "--eval_iters",
-            "10",
+            "100",
             "--out_dir",
-            "out/random",
+            "out/flesch_kincaid_desc",
+        ],
+        # subjectivity_score
+        [
+            "--batch_selection",
+            "sort_column",
+            "--sort_by_column",
+            "subjectivity_score",
+            "--sort_by_direction",
+            "asc",
+            "--max_iters",
+            "10000",
+            "--eval_interval",
+            "1000",
+            "--eval_iters",
+            "100",
+            "--out_dir",
+            "out/subj_score_asc",
+        ],
+        # subjectivity_score
+        [
+            "--batch_selection",
+            "sort_column",
+            "--sort_by_column",
+            "subjectivity_score",
+            "--sort_by_direction",
+            "desc",
+            "--max_iters",
+            "10000",
+            "--eval_interval",
+            "1000",
+            "--eval_iters",
+            "100",
+            "--out_dir",
+            "out/subj_score_desc",
         ],
     ]
+
+for args in argument_combinations:
+    run_train_script("train.py", args)
 
     for args in argument_combinations:
         run_train_script("train.py", args)

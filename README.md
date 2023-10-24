@@ -24,7 +24,14 @@ This creates a .bin file in the data/TinyStories_all_data folder that contains t
 python tinystories.py pretokenize
 ```
 
-During this process each shard is evaluated using metrics such as perplexity and sentence length. These are the same as what is used in model evaluation in 3.
+During this process each shard is tokenized and global ids are created
+
+
+#### c. Metadata
+```bash
+python tinystories.py compute_metadata
+```
+Here each sample is evaluated using metrics such as perplexity and sentence length. These are the same as what is used in model evaluation in 3.
 
 Batch metrics are stored in out/tables/batch_metrics.csv
 
