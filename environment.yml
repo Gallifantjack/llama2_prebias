@@ -1,0 +1,8 @@
+name: llama2_prebias
+channels:
+  - defaults
+  - conda-forge
+dependencies:
+  - python=3.9
+  - pip:
+    - -r file:requirements.txt

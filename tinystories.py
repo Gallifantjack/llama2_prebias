@@ -79,10 +79,6 @@ def download():
     print(f"Example story:\n{data[0]}")
 
 
-def create_global_idx(shard_id, example_id):
-    return shard_id * MAX_EXAMPLES_PER_SHARD + example_id
-
-
 def train_vocab(vocab_size):
     """
     Trains a custom sentencepiece tokenizer on the TinyStories dataset.
@@ -387,15 +383,10 @@ def verify_empty_texts(vocab_size):
 
 
 def inspect_metadata_for_empty_ids(vocab_size, confirmed_empty_ids):
-    metadata_path = os.path.join(
-        DATA_CACHE_DIR,
-        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
-    )
+    metadata_path = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv")
     df = pl.read_csv(metadata_path)
-
     # Filter the metadata dataframe for rows matching the empty IDs
     empty_id_metadata = df.filter(df["global_id"].is_in(confirmed_empty_ids))
-
     return empty_id_metadata
 
 
@@ -422,7 +413,7 @@ def verify_metadata_values(vocab_size):
 
 
 # -----------------------------------------------------------------------------
-# Dataset class
+
 class PretokDataset(torch.utils.data.Dataset):
     """Loads pretokenized examples from disk and yields them as PyTorch tensors."""
 
@@ -433,80 +424,71 @@ class PretokDataset(torch.utils.data.Dataset):
         self.vocab_size = vocab_size
         self.vocab_source = vocab_source
 
-        # Initialize shard_filenames
-        if self.vocab_source == "llama2":
-            bin_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-        elif self.vocab_source == "custom":
-            bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}")
-        else:
-            raise ValueError(f"Unknown vocab_source: {self.vocab_source}")
+        # Determine the appropriate directory for .bin files
+        bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}" if vocab_source == "custom" else "tok0")
+        print(f"Expected .bin file directory: {bin_dir}")
+        
         self.shard_filenames = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-        self.shard_filenames = (
-            self.shard_filenames[1:]
-            if self.split == "train"
-            else self.shard_filenames[:1]
-        )
-        assert len(self.shard_filenames) > 0, f"No bin files found in {bin_dir}"
+        if split == "train":
+            self.shard_filenames = self.shard_filenames[1:]
+        else:
+            self.shard_filenames = self.shard_filenames[:1]
+        
+        assert self.shard_filenames, f"No bin files found in {bin_dir}"
+        print(f"Number of .bin files found: {len(self.shard_filenames)}")
+
+        # Load index files and extract global IDs, byte offsets, and token lengths
+        self.idx_filenames = [filename.replace('.bin', '.idx') for filename in self.shard_filenames]
+        self.global_idx_list, self.byte_offset_list, self.token_length_list = [], [], []
+        for idx_file in self.idx_filenames:
+            with open(idx_file, 'r') as f:
+                for line in f:
+                    global_idx, byte_offset, token_length = line.strip().split(',')
+                    self.global_idx_list.append(global_idx)
+                    self.byte_offset_list.append(int(byte_offset))
+                    self.token_length_list.append(int(token_length))
+
+        # Create lookup dictionaries for byte offset and token length using global IDs
+        self.byte_offset_dict = dict(zip(self.global_idx_list, self.byte_offset_list))
+        self.token_length_dict = dict(zip(self.global_idx_list, self.token_length_list))
 
         # Load metadata
-        if self.vocab_source == "llama2":
-            metrics_dir = os.path.join(DATA_CACHE_DIR, "tok0")
-        elif self.vocab_source == "custom":
-            metrics_dir = os.path.join(DATA_CACHE_DIR, f"metrics{self.vocab_size}")
-        else:
-            raise ValueError(f"Unknown vocab_source: {self.vocab_source}")
+        metrics_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}" if vocab_source == "custom" else "tok0")
+        print(f"Expected metadata directory: {metrics_dir}")
 
-        self.metadata_df = pl.read_csv(
-            os.path.join(metrics_dir, "overall_metadata_for_vocab_0.csv")
-        )
-        assert (
-            "global_id" in self.metadata_df.columns
-        ), "The metadata does not contain global_idx."
+        self.metadata_df = pl.read_csv(os.path.join(metrics_dir, "overall_metadata_for_vocab_0.csv"))
 
-        df_dict = self.metadata_df.to_dict(as_series=False)
-        global_idx_values = df_dict.pop(
-            "global_id"
-        )  # remove global_idx from dict and get its values
-
-        # Construct metadata_dict where global_idx serves as the key
-        self.metadata_dict = {
-            idx: {key: df_dict[key][i] for key in df_dict}
-            for i, idx in enumerate(global_idx_values)
-        }
-
-        # Construct the order
-        self.order = self._construct_order()
-
-    def _construct_order(self):
-        """Construct the order based on shard filenames and other details."""
-        return generate_global_order(self.shard_filenames, self.max_seq_len)
 
     def __len__(self):
-        return len(self.order)
+        return len(self.global_idx_list)
 
     def __getitem__(self, index):
-        global_ix = self.order[int(index)]
 
-        # Split the string on the underscore
+        global_ix = index
         shard_str, row_str = global_ix.split("_")
-
-        # Convert the shard string and row string to integers
         shard_id = int(shard_str)
-        ix = int(row_str)
-
         shard = self.shard_filenames[shard_id]
 
+        byte_offset = self.byte_offset_dict[global_ix]
+        token_length = self.token_length_dict[global_ix]
+
         m = np.memmap(shard, dtype=np.uint16, mode="r")
+        start = byte_offset // np.uint16().nbytes
+        end = start + token_length
 
-        start = int(ix * self.max_seq_len)
-        end = int(start + self.max_seq_len + 1)
-
-        chunk = torch.from_numpy((m[start:end]).astype(np.int64))
+        chunk = torch.from_numpy(m[start:end].astype(np.int64))
         x = chunk[:-1]
         y = chunk[1:]
 
-        # Fetch metadata for the current global_ix using the dictionary
-        metadata = self.metadata_dict.get(global_ix, {})
+        # Access the metadata using polars dataframe filtering
+        metadata_row = self.metadata_df.filter(self.metadata_df["global_id"] == global_ix)
+        metadata = metadata_row.to_dict(as_series=False)  # Convert the filtered row to dictionary
+
+        # Adjust the dictionary structure to match the previous format
+        metadata = {col: metadata[col][0] for col in metadata}
+
+        if "bleu_score" not in metadata:
+            print(f"Missing bleu_score for global_ix: {global_ix}, metadata: {metadata}")
 
         return x, y, global_ix, metadata
 
@@ -514,18 +496,13 @@ class PretokDataset(torch.utils.data.Dataset):
 class DynamicSampler(torch.utils.data.Sampler):
     def __init__(self, dataset, select_func=None):
         self.dataset = dataset
+        self.split = dataset.split
         self.select_func = select_func
-        self.order = self.generate_order()
 
         if self.select_func:
-            selected_indices = self.select_func(dataset.metadata_df)
-
-            selected_indices_set = set(selected_indices)
-            self.order = [
-                global_ix
-                for global_ix in self.order
-                if global_ix in selected_indices_set
-            ]
+            self.order = self.select_func(dataset.metadata_df, dataset.global_idx_list, dataset.split)
+        else:
+            self.order = self.generate_order()
 
     def __len__(self):
         return len(self.order)
@@ -534,38 +511,45 @@ class DynamicSampler(torch.utils.data.Sampler):
         return iter(self.order)
 
     def generate_order(self):
-        """Construct the order based on shard filenames and other details."""
-        return generate_global_order(
-            self.dataset.shard_filenames, self.dataset.max_seq_len
-        )
+        """Construct the order using the global IDs in the dataset."""
+        return self.dataset.global_idx_list
 
 
-def generate_global_order(shard_filenames, max_seq_len):
-    global_indices = []
-    for shard_id, shard in enumerate(shard_filenames):
-        m = np.memmap(shard, dtype=np.uint16, mode="r")
-        num_batches = len(m) // max_seq_len
-        num_batches -= 1  # drop the last partial batch
-        for ix in range(num_batches):
-            global_indices.append(create_global_idx(shard_id, ix))
-    return global_indices
-
-
-def select_batches_sorted_by_column(metadata, column_name, ascending=True):
+def select_batches_sorted_by_column(metadata, global_idx_list, column_name, split, ascending=True):
     # Use polars to sort the metadata by the column
     metadata_sorted = metadata.sort(column_name, descending=not ascending)
 
-    # Get the correct column position for "global_idx"
-    global_idx_position = metadata_sorted.columns.index("global_id")
+    # get the global ids (last col)
+    last_column_name = metadata_sorted.columns[-1]
+    
+    # Extracting the nested lists and flattening into a single list of indices
+    sorted_2d_list = metadata_sorted.select(last_column_name).to_numpy().tolist()
+    sorted_indices = [index for sublist in sorted_2d_list for index in sublist]
 
-    # Extract the global_idx column values.
-    sorted_indices = [row[global_idx_position] for row in metadata_sorted.rows()]
-
-    return sorted_indices
+    # Filter based on split
+    if split == "train":
+        sorted_indices = [idx for idx in sorted_indices if not idx.startswith("0_")]
+    else:
+        sorted_indices = [idx for idx in sorted_indices if idx.startswith("0_")]
+    
+    # Instead of just returning the sorted global IDs, map them back to their integer index
+    idx_map = {gid: i for i, gid in enumerate(global_idx_list)}
+    sorted_indices_int = [idx_map[gid] for gid in sorted_indices]
+    
+    return sorted_indices_int
 
 
 # -----------------------------------------------------------------------------
 # public interface functions
+def custom_collate(batch):
+    # Separating inputs and labels
+    x, y, global_ix, metadata = zip(*batch)
+    
+    # Padding the sequences
+    x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=0)
+    y = torch.nn.utils.rnn.pad_sequence(y, batch_first=True, padding_value=0)
+
+    return x, y, global_ix, metadata
 
 
 class Task:
@@ -584,11 +568,13 @@ class Task:
             sampler=sampler,
             pin_memory=True,
             num_workers=num_workers,
+            collate_fn=custom_collate  
         )
 
         for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
-            y = y.to(device, non_blocking=True)
+            y = y.to(device, non_blocking=True) 
+            print(f"X shape: {x.shape}, Y shape: {y.shape}")
             yield x, y, global_ix, metadata
 
 

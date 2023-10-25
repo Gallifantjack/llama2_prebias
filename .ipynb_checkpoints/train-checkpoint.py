@@ -78,19 +78,19 @@ def setup_args_and_run(**override_args):
         "--batch_selection",
         type=str,
         choices=["random", "sort_column"],
-        default="sort_column",
+        default="random",
         help="How to select batches from the dataset",
     )
     parser.add_argument(
         "--sort_by_column",
         type=str,
-        default="flesch_kincaid_grade",
+        default=None,
         help="Column name to sort by if batch_selection is set to sort_column",
     )
     parser.add_argument(
         "--sort_by_direction",
         type=str,
-        default="desc",
+        default="asc",
         choices=["asc", "desc"],
         help="Sort direction if batch_selection is set to sort_column",
     )
@@ -218,7 +218,7 @@ def main(args):
             return partial(
                 select_batches_sorted_by_column,
                 column_name=sort_column,
-                ascending=ascending, 
+                ascending=ascending,
             )
         else:
             return None  # default
@@ -236,7 +236,9 @@ def main(args):
         vocab_size=args.vocab_size,
         vocab_source=args.vocab_source,
         device=args.device,
-        num_workers=0)
+        num_workers=0,
+        select_func=select_function,
+    )
 
     # -----------------------------------------------------------------------------
 
