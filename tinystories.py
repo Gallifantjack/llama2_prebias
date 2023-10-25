@@ -149,6 +149,18 @@ def create_global_idx(shard_id, idx):
     return f"{shard_id}_{idx}"
 
 
+def get_tokenizer_model_path(vocab_size):
+    """
+    Returns path to the sentencepiece tokenizer model for a given vocab size
+    vocab_size = 0 designates the default Llama 2 tokenizer, in that case
+    None is returned.
+    """
+    if vocab_size == 0:
+        return None
+    else:
+        return os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}.model")
+
+
 def process_shard(args, vocab_size):
     shard_id, shard = args
     tokenizer_model = get_tokenizer_model_path(vocab_size)
@@ -164,17 +176,22 @@ def process_shard(args, vocab_size):
     idx_basename = shard_basename.replace(".json", ".idx")
     idx_filename = os.path.join(bin_dir, idx_basename)
 
+    byte_offset = 0  # Start byte offset
+
     with open(tokenized_filename, "wb") as f, open(idx_filename, "w") as idx_file:
         for example in tqdm(data, position=shard_id):
             global_idx = create_global_idx(shard_id, data.index(example))
             tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
             token_length = len(tokens)
 
+            # Write global_idx, byte offset and token_length to idx file
+            idx_file.write(f"{global_idx},{byte_offset},{token_length}\n")
+
             # Write tokenized data to binary file
             f.write(np.array(tokens, dtype=np.uint16).tobytes())
 
-            # Write global_idx and token_length to idx file
-            idx_file.write(f"{global_idx},{token_length}\n")
+            # Update byte offset for the next iteration
+            byte_offset += token_length * np.uint16().nbytes
 
 
 def pretokenize(vocab_size):
@@ -200,27 +217,33 @@ def detokenize_from_bin(bin_file, idx_file, tokenizer_path):
 
     texts = []
     global_ids = []
+    empty_indices = []
 
     with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
         for line in idx:
-            global_id, token_length = line.strip().split(",")
-            token_length = int(token_length)
-            tokens = np.frombuffer(
-                f.read(token_length * 2), dtype=np.uint16
-            )  # Read 2 bytes for each token
+            global_id, byte_offset, token_length = line.strip().split(",")
+            byte_offset, token_length = int(byte_offset), int(token_length)
+
+            # Use byte offset to jump directly to the data
+            f.seek(byte_offset)
+            tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
 
             # Convert numpy array to list before decoding
             decoded_text = enc.decode(tokens.tolist())
 
+            if not decoded_text.strip():
+                empty_indices.append(global_id)
+
             texts.append(decoded_text)
+
             global_ids.append(global_id)
 
-    return texts, global_ids
+    return texts, global_ids, empty_indices
 
 
 def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
     idx_file = bin_file.replace(".bin", ".idx")
-    detokenized_texts, global_indices = detokenize_from_bin(
+    detokenized_texts, global_indices, empty_global_ids = detokenize_from_bin(
         bin_file, idx_file, tokenizer_path
     )
 
@@ -233,12 +256,20 @@ def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
         shard_metrics.append(metrics)
 
     shard_name = os.path.basename(bin_file).replace(".bin", "")
+
+    # Save shard metrics to CSV
     shard_metrics_output_path = os.path.join(
         DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_{shard_name}.csv"
     )
     pl.DataFrame(shard_metrics).write_csv(shard_metrics_output_path)
 
-    return shard_metrics_output_path
+    # Save empty global IDs for this shard
+    empty_global_ids_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}/empty_ids_for_{shard_name}.csv"
+    )
+    pl.DataFrame({"empty_global_id": empty_global_ids}).write_csv(empty_global_ids_path)
+
+    return shard_metrics_output_path, empty_global_ids_path
 
 
 def compute_metadata(vocab_size):
@@ -248,7 +279,7 @@ def compute_metadata(vocab_size):
 
     # Parallelize the processing of each shard
     with ProcessPoolExecutor() as executor:
-        shard_metric_files = list(
+        results = list(
             executor.map(
                 compute_shard_metrics,
                 bin_files,
@@ -257,25 +288,137 @@ def compute_metadata(vocab_size):
             )
         )
 
+    # Unpack the results into separate lists
+    shard_metric_files, empty_ids_files = zip(*results)
+
     print(f"Processed all shards for vocab size: {vocab_size}")
 
-    # Concatenate the computed shard metrics at the end
-    concatenate_shards(vocab_size)
+    # Concatenate the computed shard metrics and empty ids
+    concatenate_shards(vocab_size, shard_metric_files, empty_ids_files)
+
+    # Perform sanity checks
+    # Check the contents of empty_ids in the metadata- have we imputed them all
+    confirmed_empty_ids, not_empty_ids = verify_empty_texts(vocab_size)
+    print(f"Confirmed Empty IDs: {confirmed_empty_ids}")
+
+    empty_id_metadata_df = inspect_metadata_for_empty_ids(
+        vocab_size, confirmed_empty_ids
+    )
+    print(empty_id_metadata_df)
+
+    ## Does every column in the metadata have a value for every row?
+    missing_values_global_ids = verify_metadata_values(vocab_size)
+    if missing_values_global_ids:
+        print(
+            f"Global IDs with missing values in metadata: {missing_values_global_ids}"
+        )
+    else:
+        print("All rows in metadata have values in each column!")
 
 
-def concatenate_shards(vocab_size):
-    # Pattern to match all shard metric files
+def concatenate_shards(vocab_size, shard_metric_files, empty_ids_files):
+    # Concatenate metrics
     pattern = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_*.csv")
     shard_files = sorted(glob.glob(pattern))
-
     all_metrics = [pl.read_csv(file) for file in shard_files]
     overall_metrics_df = pl.concat(all_metrics, how="vertical")
-
     overall_metrics_output_path = os.path.join(
-        DATA_CACHE_DIR, f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv"
+        DATA_CACHE_DIR,
+        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
     )
     overall_metrics_df.write_csv(overall_metrics_output_path)
+
+    # Concatenate empty global ids
+    all_empty_ids = [pl.read_csv(file) for file in empty_ids_files]
+    overall_empty_ids_df = pl.concat(all_empty_ids, how="vertical")
+    overall_empty_ids_output_path = os.path.join(
+        DATA_CACHE_DIR,
+        f"tok{vocab_size}/overall_empty_ids_for_vocab_{vocab_size}.csv",
+    )
+    overall_empty_ids_df.write_csv(overall_empty_ids_output_path)
+
     print(f"Saved overall metadata results to {overall_metrics_output_path}")
+    print(f"Saved overall empty global IDs to {overall_empty_ids_output_path}")
+
+
+# Check scripts
+def verify_empty_texts(vocab_size):
+    # Load the overall CSV containing empty global IDs
+    empty_ids_path = os.path.join(
+        DATA_CACHE_DIR,
+        f"tok{vocab_size}/overall_empty_ids_for_vocab_{vocab_size}.csv",
+    )
+    df = pl.read_csv(empty_ids_path)
+    empty_global_ids = df["empty_global_id"].to_list()
+
+    confirmed_empty = []
+    not_empty = []
+
+    tokenizer_path = get_tokenizer_model_path(vocab_size)
+    enc = Tokenizer(tokenizer_model=tokenizer_path)
+
+    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
+    bin_files = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+
+    for bin_file in bin_files:
+        idx_file = bin_file.replace(".bin", ".idx")
+        with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
+            for line in idx:
+                global_id, byte_offset, token_length = line.strip().split(",")
+                byte_offset, token_length = int(byte_offset), int(token_length)
+
+                # If the current global ID is not in our list of empty IDs, skip it
+                if global_id not in empty_global_ids:
+                    continue
+
+                # Use byte offset to jump directly to the data
+                f.seek(byte_offset)
+                tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
+
+                # Convert numpy array to list before decoding
+                decoded_text = enc.decode(tokens.tolist())
+
+                if not decoded_text.strip():
+                    confirmed_empty.append(global_id)
+                else:
+                    not_empty.append(global_id)
+
+    return confirmed_empty, not_empty
+
+
+def inspect_metadata_for_empty_ids(vocab_size, confirmed_empty_ids):
+    metadata_path = os.path.join(
+        DATA_CACHE_DIR,
+        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
+    )
+    df = pl.read_csv(metadata_path)
+
+    # Filter the metadata dataframe for rows matching the empty IDs
+    empty_id_metadata = df.filter(df["global_id"].is_in(confirmed_empty_ids))
+
+    return empty_id_metadata
+
+
+def verify_metadata_values(vocab_size):
+    # Load the overall metadata CSV
+    metadata_path = os.path.join(
+        DATA_CACHE_DIR,
+        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
+    )
+    df = pl.read_csv(metadata_path)
+
+    # Create a mask for rows with any null values
+    masks = [
+        pl.col(column_name).is_null().alias(column_name) for column_name in df.columns
+    ]
+    null_masks = df.select(*masks)
+
+    # Check which rows have any null values
+    rows_with_missing_values = null_masks.filter(null_masks.sum(axis=1) > 0)[
+        "global_id"
+    ].to_list()
+
+    return rows_with_missing_values
 
 
 # -----------------------------------------------------------------------------
@@ -376,8 +519,6 @@ class DynamicSampler(torch.utils.data.Sampler):
 
         if self.select_func:
             selected_indices = self.select_func(dataset.metadata_df)
-            print(f"Selected {len(selected_indices)} indices.")
-            print(f"First few selected indices: {selected_indices[:10]}")
 
             selected_indices_set = set(selected_indices)
             self.order = [
@@ -444,15 +585,10 @@ class Task:
             pin_memory=True,
             num_workers=num_workers,
         )
-        print(f"iter batches stage: {device}")
 
         for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
-            print(x)
-            print(y)
-            print(global_ix)
-            print(metadata)
             yield x, y, global_ix, metadata
 
 
