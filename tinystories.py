@@ -139,7 +139,7 @@ def train_vocab(vocab_size):
 
 # -----------------------------------------------------------------------------
 # Tokenization functions
-def create_global_idx(shard_id, idx):
+def create_global_id(shard_id, idx):
     # A simple method to create unique ID by combining shard_id and idx
     # You can modify this function if needed.
     return f"{shard_id}_{idx}"
@@ -176,12 +176,12 @@ def process_shard(args, vocab_size):
 
     with open(tokenized_filename, "wb") as f, open(idx_filename, "w") as idx_file:
         for example in tqdm(data, position=shard_id):
-            global_idx = create_global_idx(shard_id, data.index(example))
+            global_id = create_global_id(shard_id, data.index(example))
             tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
             token_length = len(tokens)
 
-            # Write global_idx, byte offset and token_length to idx file
-            idx_file.write(f"{global_idx},{byte_offset},{token_length}\n")
+            # Write global_id, byte offset and token_length to idx file
+            idx_file.write(f"{global_id},{byte_offset},{token_length}\n")
 
             # Write tokenized data to binary file
             f.write(np.array(tokens, dtype=np.uint16).tobytes())
@@ -437,20 +437,20 @@ class PretokDataset(torch.utils.data.Dataset):
         assert self.shard_filenames, f"No bin files found in {bin_dir}"
         print(f"Number of .bin files found: {len(self.shard_filenames)}")
 
-        # Load index files and extract global IDs, byte offsets, and token lengths
+        # Load global index files and extract global IDs, byte offsets, and token lengths
         self.idx_filenames = [filename.replace('.bin', '.idx') for filename in self.shard_filenames]
-        self.global_idx_list, self.byte_offset_list, self.token_length_list = [], [], []
+        self.global_id_list, self.byte_offset_list, self.token_length_list = [], [], []
         for idx_file in self.idx_filenames:
             with open(idx_file, 'r') as f:
                 for line in f:
-                    global_idx, byte_offset, token_length = line.strip().split(',')
-                    self.global_idx_list.append(global_idx)
+                    global_id, byte_offset, token_length = line.strip().split(',')
+                    self.global_id_list.append(global_id)
                     self.byte_offset_list.append(int(byte_offset))
                     self.token_length_list.append(int(token_length))
 
         # Create lookup dictionaries for byte offset and token length using global IDs
-        self.byte_offset_dict = dict(zip(self.global_idx_list, self.byte_offset_list))
-        self.token_length_dict = dict(zip(self.global_idx_list, self.token_length_list))
+        self.byte_offset_dict = dict(zip(self.global_id_list, self.byte_offset_list))
+        self.token_length_dict = dict(zip(self.global_id_list, self.token_length_list))
 
         # Load metadata
         metrics_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}" if vocab_source == "custom" else "tok0")
@@ -460,14 +460,15 @@ class PretokDataset(torch.utils.data.Dataset):
 
 
     def __len__(self):
-        return len(self.global_idx_list)
+        return len(self.global_id_list)
 
-    def __getitem__(self, index):
+    def __getitem__(self, global_id_value):
 
-        global_ix = index
+        global_ix = global_id_value # in form shard_row e.g. 2_2300
         shard_str, row_str = global_ix.split("_")
-        shard_id = int(shard_str)
-        shard = self.shard_filenames[shard_id]
+        shard_id = int(shard_str) # e.g 2
+        row_id = int(row_str) # e.g. 2300 
+        shard = self.shard_filenames[shard_id] # e.g. tok0/2.bin
 
         byte_offset = self.byte_offset_dict[global_ix]
         token_length = self.token_length_dict[global_ix]
@@ -481,28 +482,28 @@ class PretokDataset(torch.utils.data.Dataset):
         y = chunk[1:]
 
         # Access the metadata using polars dataframe filtering
-        metadata_row = self.metadata_df.filter(self.metadata_df["global_id"] == global_ix)
+        metadata_row = self.metadata_df.filter(self.metadata_df["global_id"] == global_ix) # looks for "2_2300" in global_id column of metadata csv
         metadata = metadata_row.to_dict(as_series=False)  # Convert the filtered row to dictionary
-
-        # Adjust the dictionary structure to match the previous format
-        metadata = {col: metadata[col][0] for col in metadata}
+        metadata = {col: metadata[col][0] for col in metadata} # Adjusts dictionary to match desired format
 
         if "bleu_score" not in metadata:
             print(f"Missing bleu_score for global_ix: {global_ix}, metadata: {metadata}")
-
+            
         return x, y, global_ix, metadata
 
 
 class DynamicSampler(torch.utils.data.Sampler):
-    def __init__(self, dataset, select_func=None):
+    def __init__(self, dataset, split, select_func=None):
         self.dataset = dataset
-        self.split = dataset.split
+        self.split = split
         self.select_func = select_func
+        self.global_id_list = dataset.global_id_list
 
         if self.select_func:
-            self.order = self.select_func(dataset.metadata_df, dataset.global_idx_list, dataset.split)
+            self.order = self.select_func(self.dataset.metadata_df, self.global_id_list, self.split)
         else:
             self.order = self.generate_order()
+
 
     def __len__(self):
         return len(self.order)
@@ -511,11 +512,11 @@ class DynamicSampler(torch.utils.data.Sampler):
         return iter(self.order)
 
     def generate_order(self):
-        """Construct the order using the global IDs in the dataset."""
-        return self.dataset.global_idx_list
+        """Construct the order using the global IDs in the dataset if no select_func is provided"""
+        return self.global_id_list
 
 
-def select_batches_sorted_by_column(metadata, global_idx_list, column_name, split, ascending=True):
+def select_batches_sorted_by_column(metadata, global_id_list, column_name, split, ascending=True):
     # Use polars to sort the metadata by the column
     metadata_sorted = metadata.sort(column_name, descending=not ascending)
 
@@ -524,7 +525,7 @@ def select_batches_sorted_by_column(metadata, global_idx_list, column_name, spli
     
     # Extracting the nested lists and flattening into a single list of indices
     sorted_2d_list = metadata_sorted.select(last_column_name).to_numpy().tolist()
-    sorted_indices = [index for sublist in sorted_2d_list for index in sublist]
+    sorted_indices = [global_index_value for sublist in sorted_2d_list for global_index_value in sublist]
 
     # Filter based on split
     if split == "train":
@@ -533,7 +534,7 @@ def select_batches_sorted_by_column(metadata, global_idx_list, column_name, spli
         sorted_indices = [idx for idx in sorted_indices if idx.startswith("0_")]
     
     # Instead of just returning the sorted global IDs, map them back to their integer index
-    idx_map = {gid: i for i, gid in enumerate(global_idx_list)}
+    idx_map = {gid: i for i, gid in enumerate(global_id_list)}
     sorted_indices_int = [idx_map[gid] for gid in sorted_indices]
     
     return sorted_indices_int
@@ -541,16 +542,25 @@ def select_batches_sorted_by_column(metadata, global_idx_list, column_name, spli
 
 # -----------------------------------------------------------------------------
 # public interface functions
-def custom_collate(batch):
+def custom_collate(batch, MAX_SEQ_LEN):
     # Separating inputs and labels
     x, y, global_ix, metadata = zip(*batch)
     
     # Padding the sequences
     x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=0)
     y = torch.nn.utils.rnn.pad_sequence(y, batch_first=True, padding_value=0)
+    
+    # Limit sequence length to max_seq_len
+    max_seq_len = MAX_SEQ_LEN
+    x = x[:, :max_seq_len]
+    y = y[:, :max_seq_len]
+
+    
 
     return x, y, global_ix, metadata
 
+def get_custom_collate(max_seq_len):
+    return lambda batch: custom_collate(batch, max_seq_len)
 
 class Task:
     @staticmethod
@@ -558,9 +568,9 @@ class Task:
         split, batch_size, device, num_workers=0, select_func=None, **dataset_kwargs
     ):
         ds = PretokDataset(split=split, **dataset_kwargs)
-
+        
         # If select_func is provided, don't shuffle. Otherwise, shuffle the data.
-        sampler = DynamicSampler(ds, select_func=select_func)
+        sampler = DynamicSampler(ds, split= split, select_func=select_func)
 
         dl = torch.utils.data.DataLoader(
             ds,
@@ -568,13 +578,13 @@ class Task:
             sampler=sampler,
             pin_memory=True,
             num_workers=num_workers,
-            collate_fn=custom_collate  
+            collate_fn=get_custom_collate(max_seq_len=128)  # TODO: make this configurable
         )
 
         for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True) 
-            print(f"X shape: {x.shape}, Y shape: {y.shape}")
+                        
             yield x, y, global_ix, metadata
 
 

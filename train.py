@@ -545,7 +545,7 @@ def train_model(
             )
 
         # Reset the attention weights after each iteration
-        raw_model.reset_all_layers_attention_weights()
+        # raw_model.reset_all_layers_attention_weights() # debug check this
 
         iter_num += 1
         local_iter_num += 1
