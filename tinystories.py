@@ -12,6 +12,7 @@ from typing import List
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import glob
+import cProfile
 
 import numpy as np
 import requests
@@ -433,6 +434,9 @@ class PretokDataset(torch.utils.data.Dataset):
             self.shard_filenames = self.shard_filenames[1:]
         else:
             self.shard_filenames = self.shard_filenames[:1]
+            
+        # Memory mapping for each shard
+        self.mem_maps = [np.memmap(shard, dtype=np.uint16, mode="r") for shard in self.shard_filenames]
         
         assert self.shard_filenames, f"No bin files found in {bin_dir}"
         print(f"Number of .bin files found: {len(self.shard_filenames)}")
@@ -454,26 +458,35 @@ class PretokDataset(torch.utils.data.Dataset):
 
         # Load metadata
         metrics_dir = os.path.join(DATA_CACHE_DIR, f"tok{self.vocab_size}" if vocab_source == "custom" else "tok0")
-        print(f"Expected metadata directory: {metrics_dir}")
-
-        self.metadata_df = pl.read_csv(os.path.join(metrics_dir, "overall_metadata_for_vocab_0.csv"))
+        self.metadata_df = pl.read_csv(
+            os.path.join(metrics_dir, "overall_metadata_for_vocab_0.csv")
+        )
+        assert (
+            "global_id" in self.metadata_df.columns
+        ), "The metadata does not contain global_idx."
+        df_dict = self.metadata_df.to_dict(as_series=False)
+        global_idx_values = df_dict.pop(
+            "global_id"
+        )  # remove global_idx from dict and get its values
+        # Construct metadata_dict where global_idx serves as the key
+        self.metadata_dict = {
+            idx: {key: df_dict[key][i] for key in df_dict}
+            for i, idx in enumerate(global_idx_values)
+        }
 
 
     def __len__(self):
         return len(self.global_id_list)
 
     def __getitem__(self, global_id_value):
-
-        global_ix = global_id_value # in form shard_row e.g. 2_2300
-        shard_str, row_str = global_ix.split("_")
-        shard_id = int(shard_str) # e.g 2
-        row_id = int(row_str) # e.g. 2300 
-        shard = self.shard_filenames[shard_id] # e.g. tok0/2.bin
-
+        global_ix = global_id_value
+        shard_str, _ = global_ix.split("_")
+        shard_id = int(shard_str)
+        
         byte_offset = self.byte_offset_dict[global_ix]
         token_length = self.token_length_dict[global_ix]
 
-        m = np.memmap(shard, dtype=np.uint16, mode="r")
+        m = self.mem_maps[shard_id]
         start = byte_offset // np.uint16().nbytes
         end = start + token_length
 
@@ -481,11 +494,9 @@ class PretokDataset(torch.utils.data.Dataset):
         x = chunk[:-1]
         y = chunk[1:]
 
-        # Access the metadata using polars dataframe filtering
-        metadata_row = self.metadata_df.filter(self.metadata_df["global_id"] == global_ix) # looks for "2_2300" in global_id column of metadata csv
-        metadata = metadata_row.to_dict(as_series=False)  # Convert the filtered row to dictionary
-        metadata = {col: metadata[col][0] for col in metadata} # Adjusts dictionary to match desired format
-
+        # Access the metadata using the pre-built dictionary index
+        metadata = self.metadata_dict.get(global_ix, {})
+        
         if "bleu_score" not in metadata:
             print(f"Missing bleu_score for global_ix: {global_ix}, metadata: {metadata}")
             
@@ -546,16 +557,13 @@ def custom_collate(batch, MAX_SEQ_LEN):
     # Separating inputs and labels
     x, y, global_ix, metadata = zip(*batch)
     
+    # Limit sequence length to max_seq_len
+    x = [seq[:MAX_SEQ_LEN] for seq in x]
+    y = [seq[:MAX_SEQ_LEN] for seq in y]
+    
     # Padding the sequences
     x = torch.nn.utils.rnn.pad_sequence(x, batch_first=True, padding_value=0)
     y = torch.nn.utils.rnn.pad_sequence(y, batch_first=True, padding_value=0)
-    
-    # Limit sequence length to max_seq_len
-    max_seq_len = MAX_SEQ_LEN
-    x = x[:, :max_seq_len]
-    y = y[:, :max_seq_len]
-
-    
 
     return x, y, global_ix, metadata
 

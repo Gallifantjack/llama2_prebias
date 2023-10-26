@@ -18,6 +18,7 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 
 import math
 import os
+import cProfile
 import time
 from contextlib import nullcontext
 from datetime import datetime
@@ -560,3 +561,4 @@ def train_model(
 
 if __name__ == "__main__":
     setup_args_and_run()
+    # cProfile.run('setup_args_and_run()', 'output_profile_stats')
