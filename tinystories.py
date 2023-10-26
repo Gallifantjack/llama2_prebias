@@ -448,9 +448,12 @@ class PretokDataset(torch.utils.data.Dataset):
             with open(idx_file, 'r') as f:
                 for line in f:
                     global_id, byte_offset, token_length = line.strip().split(',')
-                    self.global_id_list.append(global_id)
-                    self.byte_offset_list.append(int(byte_offset))
-                    self.token_length_list.append(int(token_length))
+                    # Only append if token length is >= 1
+                    if int(token_length) >= 1:
+                        self.global_id_list.append(global_id)
+                        self.byte_offset_list.append(int(byte_offset))
+                        self.token_length_list.append(int(token_length))
+
 
         # Create lookup dictionaries for byte offset and token length using global IDs
         self.byte_offset_dict = dict(zip(self.global_id_list, self.byte_offset_list))
@@ -496,10 +499,7 @@ class PretokDataset(torch.utils.data.Dataset):
 
         # Access the metadata using the pre-built dictionary index
         metadata = self.metadata_dict.get(global_ix, {})
-        
-        if "bleu_score" not in metadata:
-            print(f"Missing bleu_score for global_ix: {global_ix}, metadata: {metadata}")
-            
+                                
         return x, y, global_ix, metadata
 
 
@@ -548,6 +548,8 @@ def select_batches_sorted_by_column(metadata, global_id_list, column_name, split
     idx_map = {gid: i for i, gid in enumerate(global_id_list)}
     sorted_indices_int = [idx_map[gid] for gid in sorted_indices]
     
+    print(f"Sorted indices: {sorted_indices_int}")
+    
     return sorted_indices_int
 
 
@@ -592,6 +594,9 @@ class Task:
         for x, y, global_ix, metadata in dl:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True) 
+            
+            print(f"global_ix: {global_ix}, metadata: {metadata}")
+            print(f"x: {x}, y: {y}")
                         
             yield x, y, global_ix, metadata
 

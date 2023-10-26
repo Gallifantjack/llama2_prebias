@@ -396,7 +396,7 @@ def train_model(
             batch_iter = iter_batches(split=split)
             losses = torch.zeros(args.eval_iters)  # keep on CPU
             for k in range(args.eval_iters):
-                X, Y, global_ix, metadata = next(batch_iter)
+                X, Y, _, _ = next(batch_iter)
                 with ctx:
                     logits = model(X, Y)
                     loss = raw_model.last_loss
@@ -404,6 +404,7 @@ def train_model(
             out[split] = losses.mean()
         model.train()
         return out
+
 
     # learning rate decay scheduler (cosine with warmup)
     def get_lr(it):
@@ -561,4 +562,3 @@ def train_model(
 
 if __name__ == "__main__":
     setup_args_and_run()
-    # cProfile.run('setup_args_and_run()', 'output_profile_stats')
