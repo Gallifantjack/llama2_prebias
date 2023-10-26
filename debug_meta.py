@@ -10,35 +10,36 @@ from tinystories import PretokDataset
 # p = pstats.Stats(output)
 # p.sort_stats('cumulative').print_stats(20)  # This will print the top 20 functions sorted by cumulative time
 
+import numpy as np
 
-def check_id_discrepancies(idx_filenames, metadata_df):
-    # Extract all global IDs from the .idx files
-    idx_global_ids = []
-    for idx_file in idx_filenames:
-        with open(idx_file, 'r') as f:
-            for line in f:
-                global_id, _, _ = line.strip().split(',')
-                idx_global_ids.append(global_id)
+def load_example(bin_file, byte_offset, token_length):
+    """Load an example from the binary file."""
+    bin_file.seek(byte_offset)
+    tokens = np.frombuffer(bin_file.read(token_length * np.uint16().nbytes), dtype=np.uint16)
+    return tokens
 
-    # Extract all global IDs from the metadata dataframe
-    metadata_global_ids = set(metadata_df["global_id"].to_list())
+def debug_empty_example(shard_id, bin_filename, idx_filename):
+    """Check each example in the given shard's bin and idx files for emptiness."""
+    
+    with open(bin_filename, "rb") as bin_file, open(idx_filename, "r") as idx_file:
+        for line in idx_file:
+            global_id, byte_offset, token_length = line.strip().split(',')
+            byte_offset, token_length = int(byte_offset), int(token_length)
+            
+            tokens = load_example(bin_file, byte_offset, token_length)
+            
+            if len(tokens) == 0:
+                print(f"Found empty example with global_id: {global_id}")
+                return True
+            
+    print("No empty examples found.")
+    return False
 
-    # Find global IDs that are in the .idx files but not in the metadata
-    missing_in_metadata = [gid for gid in idx_global_ids if gid not in metadata_global_ids]
+# Update the paths to your files accordingly
+bin_dir = "data/tok0" # Replace with your appropriate paths
+shard_basename = "data02.bin"  # Name of the second shard without file extension
 
-    # Find global IDs that are in the metadata but not in the .idx files
-    missing_in_idx = [gid for gid in metadata_global_ids if gid not in idx_global_ids]
+bin_filename = os.path.join(bin_dir, shard_basename.replace(".json", ".bin"))
+idx_filename = os.path.join(bin_dir, shard_basename.replace(".json", ".idx"))
 
-    return missing_in_metadata, missing_in_idx
-
-# Use the check_id_discrepancies function
-ds = PretokDataset(split="train", max_seq_len=128, vocab_size=0, vocab_source="custom") # Example arguments, adjust accordingly
-missing_in_metadata, missing_in_idx = check_id_discrepancies(ds.idx_filenames, ds.metadata_df)
-
-if not missing_in_metadata and not missing_in_idx:
-    print("The global IDs in the .idx files and metadata match perfectly!")
-else:
-    if missing_in_metadata:
-        print(f"Global IDs present in .idx files but missing in metadata: {missing_in_metadata}")
-    if missing_in_idx:
-        print(f"Global IDs present in metadata but missing in .idx files: {missing_in_idx}")
+debug_empty_example(1, bin_filename, idx_filename) # Using shard_id=1 for the second shard

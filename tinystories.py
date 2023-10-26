@@ -4,12 +4,13 @@ Download, preprocess and serve the TinyStories dataset as a DataLoader.
 
 import argparse
 import glob
+import math
 import json
 import os
 import random
 import itertools
 from typing import List
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 import glob
 import cProfile
@@ -166,30 +167,54 @@ def process_shard(args, vocab_size):
     with open(shard, "r") as f:
         data = json.load(f)
 
-    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-    shard_basename = os.path.basename(shard)
-    bin_basename = shard_basename.replace(".json", ".bin")
-    tokenized_filename = os.path.join(bin_dir, bin_basename)
-    idx_basename = shard_basename.replace(".json", ".idx")
-    idx_filename = os.path.join(bin_dir, idx_basename)
+    shard_data = []
 
-    byte_offset = 0  # Start byte offset
+    for idx, example in tqdm(enumerate(data), position=shard_id):
+        global_id = create_global_id(shard_id, idx)
+        tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
+        
+        # Drop texts with under 5 tokens
+        if len(tokens) < 5:
+            continue
 
-    with open(tokenized_filename, "wb") as f, open(idx_filename, "w") as idx_file:
-        for example in tqdm(data, position=shard_id):
-            global_id = create_global_id(shard_id, data.index(example))
-            tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
-            token_length = len(tokens)
+        token_length = len(tokens)
+        shard_data.append((global_id, tokens))
 
-            # Write global_id, byte offset and token_length to idx file
-            idx_file.write(f"{global_id},{byte_offset},{token_length}\n")
+    return shard_data
 
-            # Write tokenized data to binary file
-            f.write(np.array(tokens, dtype=np.uint16).tobytes())
+def verify_bin_and_idx(bin_filename, idx_filename):
+    global_ids = set()
+    duplicates = []
+    empties = []
+    
+    with open(bin_filename, "rb") as f, open(idx_filename, "r") as idx:
+        for line in idx:
+            global_id, byte_offset, token_length = line.strip().split(",")
+            byte_offset, token_length = int(byte_offset), int(token_length)
+            
+            # Check for duplicate IDs
+            if global_id in global_ids:
+                duplicates.append(global_id)
+            global_ids.add(global_id)
 
-            # Update byte offset for the next iteration
-            byte_offset += token_length * np.uint16().nbytes
+            # Use byte offset to jump directly to the data
+            f.seek(byte_offset)
+            tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
+            
+            # Check for examples < 5 tokens
+            if token_length < 5:
+                empties.append(global_id)
 
+    # Report the results
+    if not duplicates:
+        print("No duplicate global IDs found!")
+    else:
+        print(f"Found duplicate global IDs: {duplicates}")
+
+    if not empties:
+        print("No empty tokenized examples found!")
+    else:
+        print(f"Found empty tokenized examples for global IDs: {empties}")
 
 def pretokenize(vocab_size):
     data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
@@ -200,217 +225,71 @@ def pretokenize(vocab_size):
 
     fun = partial(process_shard, vocab_size=vocab_size)
     with ProcessPoolExecutor() as executor:
-        executor.map(fun, enumerate(shard_filenames))
+        all_shard_data = list(executor.map(fun, enumerate(shard_filenames)))
+
+    merged_tokenized_filename = os.path.join(bin_dir, "merged_data.bin")
+    merged_idx_filename = os.path.join(bin_dir, "merged_data.idx")
+
+    with open(merged_tokenized_filename, "wb") as f, open(merged_idx_filename, "w") as idx_file:
+        for shard_data in all_shard_data:
+            for global_id, tokens in shard_data:
+                token_length = len(tokens)
+                idx_file.write(f"{global_id},{f.tell()},{token_length}\n")
+                f.write(np.array(tokens, dtype=np.uint16).tobytes())
+
+    # Run the verification
+    verify_bin_and_idx(merged_tokenized_filename, merged_idx_filename)
 
     print("Done.")
 
-
 # -----------------------------------------------------------------------------
 # Metadata functions
-
-
 def detokenize_from_bin(bin_file, idx_file, tokenizer_path):
     enc = Tokenizer(tokenizer_model=tokenizer_path)
-
-    texts = []
-    global_ids = []
-    empty_indices = []
+    texts, global_ids, empty_indices = [], [], []
 
     with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
         for line in idx:
-            global_id, byte_offset, token_length = line.strip().split(",")
-            byte_offset, token_length = int(byte_offset), int(token_length)
-
-            # Use byte offset to jump directly to the data
+            global_id, byte_offset, token_length = map(int, line.strip().split(","))
             f.seek(byte_offset)
             tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
-
-            # Convert numpy array to list before decoding
             decoded_text = enc.decode(tokens.tolist())
-
+            
             if not decoded_text.strip():
                 empty_indices.append(global_id)
 
             texts.append(decoded_text)
-
             global_ids.append(global_id)
 
     return texts, global_ids, empty_indices
 
-
 def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
     idx_file = bin_file.replace(".bin", ".idx")
-    detokenized_texts, global_indices, empty_global_ids = detokenize_from_bin(
-        bin_file, idx_file, tokenizer_path
-    )
-
+    detokenized_texts, global_indices, empty_global_ids = detokenize_from_bin(bin_file, idx_file, tokenizer_path)
+    
     shard_metrics = []
     for idx, detokenized_text in enumerate(detokenized_texts):
-        metrics = evaluate_textual_metrics(
-            detokenized_text, expected_stdout.decode("utf-8")
-        )
-        metrics["global_id"] = global_indices[idx]  # Attach global_id to the metrics
+        metrics = evaluate_textual_metrics(detokenized_text, expected_stdout.decode("utf-8"))
+        metrics["global_id"] = global_indices[idx]
         shard_metrics.append(metrics)
 
-    shard_name = os.path.basename(bin_file).replace(".bin", "")
-
-    # Save shard metrics to CSV
-    shard_metrics_output_path = os.path.join(
-        DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_{shard_name}.csv"
-    )
-    pl.DataFrame(shard_metrics).write_csv(shard_metrics_output_path)
-
-    # Save empty global IDs for this shard
-    empty_global_ids_path = os.path.join(
-        DATA_CACHE_DIR, f"tok{vocab_size}/empty_ids_for_{shard_name}.csv"
-    )
-    pl.DataFrame({"empty_global_id": empty_global_ids}).write_csv(empty_global_ids_path)
-
-    return shard_metrics_output_path, empty_global_ids_path
-
+    return shard_metrics, empty_global_ids
 
 def compute_metadata(vocab_size):
-    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-    bin_files = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
+    bin_file = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data.bin")
     tokenizer_path = get_tokenizer_model_path(vocab_size)
+    
+    # Compute metrics and get empty IDs
+    shard_metrics, empty_global_ids = compute_shard_metrics(bin_file, tokenizer_path, vocab_size)
 
-    # Parallelize the processing of each shard
-    with ProcessPoolExecutor() as executor:
-        results = list(
-            executor.map(
-                compute_shard_metrics,
-                bin_files,
-                itertools.repeat(tokenizer_path, len(bin_files)),
-                itertools.repeat(vocab_size, len(bin_files)),
-            )
-        )
+    # Save results to CSV
+    metrics_output_path = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/metadata.csv")
+    pl.DataFrame(shard_metrics).write_csv(metrics_output_path)
+    
+    empty_ids_output_path = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/empty_ids.csv")
+    pl.DataFrame({"empty_global_id": empty_global_ids}).write_csv(empty_ids_output_path)
 
-    # Unpack the results into separate lists
-    shard_metric_files, empty_ids_files = zip(*results)
-
-    print(f"Processed all shards for vocab size: {vocab_size}")
-
-    # Concatenate the computed shard metrics and empty ids
-    concatenate_shards(vocab_size, shard_metric_files, empty_ids_files)
-
-    # Perform sanity checks
-    # Check the contents of empty_ids in the metadata- have we imputed them all
-    confirmed_empty_ids, not_empty_ids = verify_empty_texts(vocab_size)
-    print(f"Confirmed Empty IDs: {confirmed_empty_ids}")
-
-    empty_id_metadata_df = inspect_metadata_for_empty_ids(
-        vocab_size, confirmed_empty_ids
-    )
-    print(empty_id_metadata_df)
-
-    ## Does every column in the metadata have a value for every row?
-    missing_values_global_ids = verify_metadata_values(vocab_size)
-    if missing_values_global_ids:
-        print(
-            f"Global IDs with missing values in metadata: {missing_values_global_ids}"
-        )
-    else:
-        print("All rows in metadata have values in each column!")
-
-
-def concatenate_shards(vocab_size, shard_metric_files, empty_ids_files):
-    # Concatenate metrics
-    pattern = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/metadata_for_*.csv")
-    shard_files = sorted(glob.glob(pattern))
-    all_metrics = [pl.read_csv(file) for file in shard_files]
-    overall_metrics_df = pl.concat(all_metrics, how="vertical")
-    overall_metrics_output_path = os.path.join(
-        DATA_CACHE_DIR,
-        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
-    )
-    overall_metrics_df.write_csv(overall_metrics_output_path)
-
-    # Concatenate empty global ids
-    all_empty_ids = [pl.read_csv(file) for file in empty_ids_files]
-    overall_empty_ids_df = pl.concat(all_empty_ids, how="vertical")
-    overall_empty_ids_output_path = os.path.join(
-        DATA_CACHE_DIR,
-        f"tok{vocab_size}/overall_empty_ids_for_vocab_{vocab_size}.csv",
-    )
-    overall_empty_ids_df.write_csv(overall_empty_ids_output_path)
-
-    print(f"Saved overall metadata results to {overall_metrics_output_path}")
-    print(f"Saved overall empty global IDs to {overall_empty_ids_output_path}")
-
-
-# Check scripts
-def verify_empty_texts(vocab_size):
-    # Load the overall CSV containing empty global IDs
-    empty_ids_path = os.path.join(
-        DATA_CACHE_DIR,
-        f"tok{vocab_size}/overall_empty_ids_for_vocab_{vocab_size}.csv",
-    )
-    df = pl.read_csv(empty_ids_path)
-    empty_global_ids = df["empty_global_id"].to_list()
-
-    confirmed_empty = []
-    not_empty = []
-
-    tokenizer_path = get_tokenizer_model_path(vocab_size)
-    enc = Tokenizer(tokenizer_model=tokenizer_path)
-
-    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-    bin_files = sorted(glob.glob(os.path.join(bin_dir, "*.bin")))
-
-    for bin_file in bin_files:
-        idx_file = bin_file.replace(".bin", ".idx")
-        with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
-            for line in idx:
-                global_id, byte_offset, token_length = line.strip().split(",")
-                byte_offset, token_length = int(byte_offset), int(token_length)
-
-                # If the current global ID is not in our list of empty IDs, skip it
-                if global_id not in empty_global_ids:
-                    continue
-
-                # Use byte offset to jump directly to the data
-                f.seek(byte_offset)
-                tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
-
-                # Convert numpy array to list before decoding
-                decoded_text = enc.decode(tokens.tolist())
-
-                if not decoded_text.strip():
-                    confirmed_empty.append(global_id)
-                else:
-                    not_empty.append(global_id)
-
-    return confirmed_empty, not_empty
-
-
-def inspect_metadata_for_empty_ids(vocab_size, confirmed_empty_ids):
-    metadata_path = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv")
-    df = pl.read_csv(metadata_path)
-    # Filter the metadata dataframe for rows matching the empty IDs
-    empty_id_metadata = df.filter(df["global_id"].is_in(confirmed_empty_ids))
-    return empty_id_metadata
-
-
-def verify_metadata_values(vocab_size):
-    # Load the overall metadata CSV
-    metadata_path = os.path.join(
-        DATA_CACHE_DIR,
-        f"tok{vocab_size}/overall_metadata_for_vocab_{vocab_size}.csv",
-    )
-    df = pl.read_csv(metadata_path)
-
-    # Create a mask for rows with any null values
-    masks = [
-        pl.col(column_name).is_null().alias(column_name) for column_name in df.columns
-    ]
-    null_masks = df.select(*masks)
-
-    # Check which rows have any null values
-    rows_with_missing_values = null_masks.filter(null_masks.sum(axis=1) > 0)[
-        "global_id"
-    ].to_list()
-
-    return rows_with_missing_values
+    print(f"Processed data for vocab size: {vocab_size}")
 
 
 # -----------------------------------------------------------------------------
@@ -442,17 +321,35 @@ class PretokDataset(torch.utils.data.Dataset):
         print(f"Number of .bin files found: {len(self.shard_filenames)}")
 
         # Load global index files and extract global IDs, byte offsets, and token lengths
-        self.idx_filenames = [filename.replace('.bin', '.idx') for filename in self.shard_filenames]
         self.global_id_list, self.byte_offset_list, self.token_length_list = [], [], []
-        for idx_file in self.idx_filenames:
-            with open(idx_file, 'r') as f:
-                for line in f:
-                    global_id, byte_offset, token_length = line.strip().split(',')
-                    # Only append if token length is >= 1
-                    if int(token_length) >= 1:
-                        self.global_id_list.append(global_id)
-                        self.byte_offset_list.append(int(byte_offset))
-                        self.token_length_list.append(int(token_length))
+        with open(self.idx_filename, 'r') as f:
+            for line in f:
+                global_id, byte_offset, token_length = line.strip().split(',')
+                # Only append if token length is >= 1
+                if int(token_length) >= 1:
+                    self.global_id_list.append(global_id)
+                    self.byte_offset_list.append(int(byte_offset))
+                    self.token_length_list.append(int(token_length))
+
+        # Split the data into training and validation sets
+        data_size = len(self.global_id_list)
+        indices = list(range(data_size))
+        split_idx = int(0.9 * data_size)  # 90% for training, 10% for validation
+        
+        # Shuffle the indices and split
+        random.shuffle(indices)
+        train_indices = indices[:split_idx]
+        valid_indices = indices[split_idx:]
+        
+        # Select the appropriate split based on the 'split' argument
+        if split == "train":
+            self.global_id_list = [self.global_id_list[i] for i in train_indices]
+            self.byte_offset_list = [self.byte_offset_list[i] for i in train_indices]
+            self.token_length_list = [self.token_length_list[i] for i in train_indices]
+        else:  # split == "valid"
+            self.global_id_list = [self.global_id_list[i] for i in valid_indices]
+            self.byte_offset_list = [self.byte_offset_list[i] for i in valid_indices]
+            self.token_length_list = [self.token_length_list[i] for i in valid_indices]
 
 
         # Create lookup dictionaries for byte offset and token length using global IDs
