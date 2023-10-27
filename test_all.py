@@ -9,7 +9,7 @@ import subprocess
 
 
 import torch
-from model import ModelArgs, Transformer
+from modelling.model import ModelArgs, Transformer
 from tokenizer import Tokenizer
 
 # -----------------------------------------------------------------------------

@@ -26,11 +26,12 @@ from functools import partial
 import polars as pl
 import argparse
 import torch
-from model import Transformer, ModelArgs
+from modelling.model import Transformer, ModelArgs
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from tinystories import Task, select_batches_sorted_by_column
+from dataloaders import Task
+from samplers import select_batches_sorted_by_column
 from export import model_export
 
 # -----------------------------------------------------------------------------
@@ -219,7 +220,7 @@ def main(args):
             return partial(
                 select_batches_sorted_by_column,
                 column_name=sort_column,
-                ascending=ascending, 
+                ascending=ascending,
             )
         else:
             return None  # default
@@ -237,7 +238,8 @@ def main(args):
         vocab_size=args.vocab_size,
         vocab_source=args.vocab_source,
         device=args.device,
-        num_workers=0)
+        num_workers=0,
+    )
 
     # -----------------------------------------------------------------------------
 
@@ -404,7 +406,6 @@ def train_model(
             out[split] = losses.mean()
         model.train()
         return out
-
 
     # learning rate decay scheduler (cosine with warmup)
     def get_lr(it):

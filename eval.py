@@ -1,6 +1,6 @@
 import os
 import torch
-from model import Transformer, ModelArgs
+from modelling.model import Transformer, ModelArgs
 from tokenizer import Tokenizer
 import polars as pl
 from evaluators import evaluate_textual_metrics
