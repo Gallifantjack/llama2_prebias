@@ -76,8 +76,10 @@ class PreprocessingPipeline:
         data_dir = os.path.join(self.data_cache_dir, "TinyStories_all_data")
         shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
 
-        if debug:
+        if debug is True:
             shard_filenames = shard_filenames[:2]
+        else:
+            shard_filenames = shard_filenames
 
         all_batches = []
         for shard in tqdm(shard_filenames):
@@ -94,9 +96,14 @@ class PreprocessingPipeline:
             }
         )
 
-        parquet_path = os.path.join(
-            self.data_cache_dir, f"tok{self.vocab_size}", "merged_data.parquet"
+        tok_path = os.path.join(
+            self.data_cache_dir, f"tok{self.vocab_size}"
         )
+        if not os.path.exists(tok_path):
+            os.makedirs(tok_path, exist_ok=True)
+        
+        parquet_path = os.path.join(tok_path, f"merged_data.parquet")
+        
         df.to_parquet(parquet_path, compression="snappy", index=False)
         self.global_id_counter = end_id
         print("Done.")
@@ -113,9 +120,5 @@ if __name__ == "__main__":
     pipeline = PreprocessingPipeline(
         tokenizer_model_path, data_cache_dir, vocab_size, max_seq_length
     )
-    pipeline.run(debug=True)
+    pipeline.run()
 
-
-# what are we parallelising in the above script, as we have multiple processes running, but very little usage and tqdm stuck on 0% .
-
-# check for errors in the above script. we are looking for unique ids and efficient storage of token batches that can be indexed by these unique ids

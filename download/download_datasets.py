@@ -5,6 +5,7 @@ import requests
 from tqdm import tqdm
 import argparse
 
+from utils.paths import DATA_CACHE_DIR
 
 def download_file(url: str, fname: str, chunk_size=1024):
     """Helper function to download a file from a given url"""
