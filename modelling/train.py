@@ -31,8 +31,8 @@ from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 from dataloaders import Task
-from samplers import select_batches_sorted_by_column
 from export import model_export
+from modelling.transformation_functions import *
 
 # -----------------------------------------------------------------------------
 
@@ -77,24 +77,23 @@ def setup_args_and_run(**override_args):
 
     # batch selection
     parser.add_argument(
-        "--batch_selection",
+        "--transform_method",
         type=str,
-        choices=["random", "sort_column"],
-        default="sort_column",
-        help="How to select batches from the dataset",
+        choices=["sort_ascending", "filter_by_threshold", "combined_transform", "none"],
+        default="none",
+        help="Transformation method to use on the dataset",
     )
     parser.add_argument(
-        "--sort_by_column",
+        "--transform_column",
         type=str,
-        default="flesch_kincaid_grade",
-        help="Column name to sort by if batch_selection is set to sort_column",
+        default=None,
+        help="Column name to be used for the transformation",
     )
     parser.add_argument(
-        "--sort_by_direction",
-        type=str,
-        default="desc",
-        choices=["asc", "desc"],
-        help="Sort direction if batch_selection is set to sort_column",
+        "--transform_threshold",
+        type=float,
+        default=None,
+        help="Threshold value to be used for the transformation",
     )
 
     # model
@@ -214,19 +213,22 @@ def main(args):
 
     # -----------------------------------------------------------------------------
     # Batch selection
-    def get_select_func(selection_strategy, sort_column=None, sort_direction="asc"):
-        if selection_strategy == "sort_column" and sort_column:
-            ascending = True if sort_direction == "asc" else False
+    def get_select_func(selection_strategy, column_name=None, threshold=None):
+        if selection_strategy == "sort_ascending" and column_name:
+            return partial(sort_ascending, column_name=column_name)
+        elif selection_strategy == "filter_by_threshold" and column_name and threshold:
             return partial(
-                select_batches_sorted_by_column,
-                column_name=sort_column,
-                ascending=ascending,
+                filter_by_threshold, column_name=column_name, threshold=threshold
+            )
+        elif selection_strategy == "combined_transform" and column_name and threshold:
+            return partial(
+                combined_transform, column_name=column_name, threshold=threshold
             )
         else:
             return None  # default
 
     select_function = get_select_func(
-        args.batch_selection, args.sort_by_column, args.sort_by_direction
+        args.transform_method, args.transform_column, args.transform_threshold
     )
 
     # -----------------------------------------------------------------------------

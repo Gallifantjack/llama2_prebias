@@ -40,7 +40,4 @@ class Task:
             x = x.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True)
 
-            print(f"global_ix: {global_ix}, metadata: {metadata}")
-            print(f"x: {x}, y: {y}")
-
             yield x, y, global_ix, metadata

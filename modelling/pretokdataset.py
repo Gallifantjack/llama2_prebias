@@ -18,8 +18,6 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from metadata.evaluators import evaluate_textual_metrics
-from metadata.checkpoint_metadata import expected_stdout
 from train_tok.tokenizer import Tokenizer
 import polars as pl
 import pandas as pd
