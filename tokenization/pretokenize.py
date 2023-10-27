@@ -18,15 +18,13 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from metadata.evaluators import evaluate_textual_metrics
-from metadata.checkpoint_metadata import expected_stdout
-from train_tok.tokenizer import Tokenizer
 import polars as pl
 import pandas as pd
 from torch.utils.data import Sampler
 
 from utils.paths import DATA_CACHE_DIR
 from utils.functions import create_global_id, get_tokenizer_model_path
+from train_tok.tokenizer import Tokenizer
 
 # -----------------------------------------------------------------------------
 # Tokenization functions

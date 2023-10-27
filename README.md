@@ -10,7 +10,7 @@ Fork from llama2.c
 First we download tinystories dataset. 
 
 ```bash
-python tinystories.py download
+python download/download_datasets.py download tinystories
 ```
 
 This creates a new folder called data in the root directory that contains 'TinyStories_all_data'.
@@ -21,7 +21,7 @@ We then tokenize the dataset using sentencepiece tokenizer model.
 This creates a .bin file in the data/TinyStories_all_data folder that contains the tokenized dataset.
 
 ```bash
-python tinystories.py pretokenize
+python tokenization/pretokenize.py pretokenize --debug
 ```
 
 During this process each shard is tokenized and global ids are created
@@ -29,7 +29,7 @@ During this process each shard is tokenized and global ids are created
 
 #### c. Metadata
 ```bash
-python tinystories.py compute_metadata
+python metadata/batch_metadata.py compute_metadata --debug
 ```
 Here each sample is evaluated using metrics such as perplexity and sentence length. These are the same as what is used in model evaluation in 3.
 

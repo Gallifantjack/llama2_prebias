@@ -1,18 +1,28 @@
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from textstat import flesch_kincaid_grade, gunning_fog
 from textblob import TextBlob
+import re
 
 PROFANITIES = set(["prison", "hate"])
 
 
 class Evaluators:
+    # Moved this outside of the __init__ method to ensure it's compiled once
+    PROFANITY_REGEX = re.compile(
+        r"\b(?:" + "|".join(map(re.escape, PROFANITIES)) + r")\b", re.IGNORECASE
+    )
+
     def __init__(self, decoded_text):
         if not decoded_text:
             # Default values for empty text
-            print("Empty text")
-            self.text = []
+            self.text = []  # Tokenized form
+            self.text_str = ""  # Detokenized form
+            self.blob = None
         else:
             self.text = decoded_text.split()
+            self.text_str = decoded_text
+            self.blob = TextBlob(self.text_str)
+        self.errors = []  # To collect errors
 
     def bleu_score(self, reference):
         try:
@@ -21,21 +31,7 @@ class Evaluators:
                 [reference.split()], self.text, smoothing_function=smoothing
             )
         except Exception as e:
-            print(f"Error computing BLEU score: {str(e)}")  # Log the error
-            return 0.0
-
-    def flesch_kincaid_grade(self):
-        try:
-            return flesch_kincaid_grade(" ".join(self.text))
-        except Exception as e:
-            print(f"Error computing Flesch-Kincaid grade: {str(e)}")  # Log the error
-            return 0.0
-
-    def gunning_fog(self):
-        try:
-            return gunning_fog(" ".join(self.text))
-        except Exception as e:
-            print(f"Error computing Gunning Fog index: {str(e)}")  # Log the error
+            self.errors.append(f"Error computing BLEU score: {str(e)}")
             return 0.0
 
     def vocabulary_diversity(self):
@@ -44,35 +40,43 @@ class Evaluators:
             unique_tokens = len(set(self.text))
             return unique_tokens / total_tokens if total_tokens else 0
         except Exception as e:
-            print(f"Error computing vocabulary diversity: {str(e)}")  # Log the error
+            self.errors.append(f"Error computing vocabulary diversity: {str(e)}")
             return 0.0
 
     def subjectivity_score(self):
         try:
-            blob = TextBlob(" ".join(self.text))
-            return blob.sentiment.subjectivity
+            return self.blob.sentiment.subjectivity
         except Exception as e:
-            print(f"Error computing subjectivity score: {str(e)}")  # Log the error
+            self.errors.append(f"Error computing subjectivity score: {str(e)}")
             return 0.0
 
     def sentiment_score(self):
         try:
-            blob = TextBlob(" ".join(self.text))
-            return blob.sentiment.polarity
+            return self.blob.sentiment.polarity
         except Exception as e:
-            print(f"Error computing sentiment score: {str(e)}")  # Log the error
+            self.errors.append(f"Error computing sentiment score: {str(e)}")
+            return 0.0
+
+    def flesch_kincaid_grade(self):
+        try:
+            return flesch_kincaid_grade(self.text_str)
+        except Exception as e:
+            self.errors.append(f"Error computing Flesch-Kincaid grade: {str(e)}")
+            return 0.0
+
+    def gunning_fog(self):
+        try:
+            return gunning_fog(self.text_str)
+        except Exception as e:
+            self.errors.append(f"Error computing Gunning Fog index: {str(e)}")
             return 0.0
 
     def profanity_check(self):
         try:
-            return (
-                sum(1 for word in self.text if word.lower() in PROFANITIES)
-                / len(self.text)
-                if self.text
-                else 0
-            )
+            profanity_count = len(self.PROFANITY_REGEX.findall(self.text_str))
+            return profanity_count / len(self.text) if self.text else 0
         except Exception as e:
-            print(f"Error computing profanity check: {str(e)}")  # Log the error
+            self.errors.append(f"Error computing profanity check: {str(e)}")
             return 0.0
 
     def all_metrics(self, reference):
@@ -85,6 +89,8 @@ class Evaluators:
             "sentiment_score": self.sentiment_score(),
             "profanity_check": self.profanity_check(),
         }
+        if self.errors:
+            print("\n".join(self.errors))
         return metrics
 
 

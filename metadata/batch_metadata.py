@@ -3,18 +3,15 @@ import glob
 import math
 import json
 import os
-import random
-import itertools
 from typing import List
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 import glob
 import cProfile
+import itertools
 
 import numpy as np
-import requests
 import sentencepiece as spm
-import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
@@ -23,11 +20,11 @@ import pandas as pd
 from torch.utils.data import Sampler
 
 # relative imports
-from evaluators import evaluate_textual_metrics
+from metadata.evaluators import evaluate_textual_metrics
 from train_tok.tokenizer import Tokenizer
 
 from utils.paths import DATA_CACHE_DIR
-from utils.functions import create_global_id, get_tokenizer_model_path
+from utils.functions import get_tokenizer_model_path
 
 # -----------------------------------------------------------------------------
 expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
@@ -36,27 +33,53 @@ expected_stdout = b"Once upon a time, there was a little girl named Lily. She lo
 # -----------------------------------------------------------------------------
 # Metadata functions
 def detokenize_from_bin(bin_file, idx_file, tokenizer_path, debug=False):
+    CHUNK_SIZE = 10 * 1024 * 1024  # For example, 10 MB
     enc = Tokenizer(tokenizer_model=tokenizer_path)
     texts, global_ids, empty_indices = [], [], []
+    offsets = []
 
-    with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
-        # If debug flag is set, only consider the first 200 lines
-        if debug:
-            lines = lines[:200]
-
+    with open(idx_file, "r") as idx:
         for line in idx:
             global_id, byte_offset, token_length = map(int, line.strip().split(","))
-            f.seek(byte_offset)
-            tokens = np.frombuffer(f.read(token_length * 2), dtype=np.uint16)
-            decoded_text = enc.decode(tokens.tolist())
+            offsets.append((global_id, byte_offset, token_length))
+            if debug and len(offsets) >= 200:
+                break
 
-            if not decoded_text.strip():
-                empty_indices.append(global_id)
+    with open(bin_file, "rb") as f:
+        chunk_start = 0
+        while chunk_start < os.path.getsize(bin_file):
+            f.seek(chunk_start)
+            chunk = f.read(CHUNK_SIZE)
+            next_chunk_start = chunk_start + CHUNK_SIZE
 
-            texts.append(decoded_text)
-            global_ids.append(global_id)
+            # Process offsets that are inside the current chunk
+            while offsets and offsets[0][1] < next_chunk_start:
+                global_id, byte_offset, token_length = offsets.pop(0)
+                relative_offset = byte_offset - chunk_start
+                tokens = np.frombuffer(
+                    chunk[relative_offset : relative_offset + token_length * 2],
+                    dtype=np.uint16,
+                )
+                decoded_text = enc.decode(tokens.tolist())
+                if not decoded_text.strip():
+                    empty_indices.append(global_id)
+                texts.append(decoded_text)
+                global_ids.append(global_id)
+
+            chunk_start = next_chunk_start
 
     return texts, global_ids, empty_indices
+
+
+def worker(texts, global_indices):
+    shard_metrics = []
+    for idx, detokenized_text in enumerate(texts):
+        metrics = evaluate_textual_metrics(
+            detokenized_text, expected_stdout.decode("utf-8")
+        )
+        metrics["global_id"] = global_indices[idx]
+        shard_metrics.append(metrics)
+    return shard_metrics
 
 
 def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
@@ -65,13 +88,21 @@ def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
         bin_file, idx_file, tokenizer_path
     )
 
-    shard_metrics = []
-    for idx, detokenized_text in enumerate(detokenized_texts):
-        metrics = evaluate_textual_metrics(
-            detokenized_text, expected_stdout.decode("utf-8")
-        )
-        metrics["global_id"] = global_indices[idx]
-        shard_metrics.append(metrics)
+    # Parallelizing the computation
+    with ProcessPoolExecutor() as executor:
+        chunk_size = math.ceil(len(detokenized_texts) / os.cpu_count())
+        futures = [
+            executor.submit(
+                worker,
+                detokenized_texts[i : i + chunk_size],
+                global_indices[i : i + chunk_size],
+            )
+            for i in range(0, len(detokenized_texts), chunk_size)
+        ]
+        results = [f.result() for f in futures]
+
+    # Flattening the results
+    shard_metrics = list(itertools.chain(*results))
 
     return shard_metrics, empty_global_ids
 
