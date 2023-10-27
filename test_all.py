@@ -10,7 +10,7 @@ import subprocess
 
 import torch
 from modelling.model import ModelArgs, Transformer
-from tokenizer import Tokenizer
+from train_tok.tokenizer import Tokenizer
 
 # -----------------------------------------------------------------------------
 # test utilities

@@ -18,24 +18,32 @@ import torch
 import torch.distributed as dist
 from tqdm import tqdm
 
-from evaluators import evaluate_textual_metrics
-from eval import expected_stdout
-from tokenizer import Tokenizer
 import polars as pl
 import pandas as pd
 from torch.utils.data import Sampler
 
+# relative imports
+from evaluators import evaluate_textual_metrics
+from train_tok.tokenizer import Tokenizer
+
 from utils.paths import DATA_CACHE_DIR
 from utils.functions import create_global_id, get_tokenizer_model_path
+
+# -----------------------------------------------------------------------------
+expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
 
 
 # -----------------------------------------------------------------------------
 # Metadata functions
-def detokenize_from_bin(bin_file, idx_file, tokenizer_path):
+def detokenize_from_bin(bin_file, idx_file, tokenizer_path, debug=False):
     enc = Tokenizer(tokenizer_model=tokenizer_path)
     texts, global_ids, empty_indices = [], [], []
 
     with open(bin_file, "rb") as f, open(idx_file, "r") as idx:
+        # If debug flag is set, only consider the first 200 lines
+        if debug:
+            lines = lines[:200]
+
         for line in idx:
             global_id, byte_offset, token_length = map(int, line.strip().split(","))
             f.seek(byte_offset)
@@ -68,7 +76,7 @@ def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
     return shard_metrics, empty_global_ids
 
 
-def compute_metadata(vocab_size):
+def compute_metadata(vocab_size, debug=False):
     bin_file = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data.bin")
     tokenizer_path = get_tokenizer_model_path(vocab_size)
 
@@ -115,6 +123,6 @@ if __name__ == "__main__":
 
     # depending on the stage call the appropriate function
     if args.stage == "compute_metadata":
-        compute_metadata(vocab_size=args.vocab_size)
+        compute_metadata(vocab_size=args.vocab_size, debug=args.debug)
     else:
         raise ValueError(f"Unknown stage {args.stage}")

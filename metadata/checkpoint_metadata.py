@@ -1,17 +1,13 @@
 import os
 import torch
 from modelling.model import Transformer, ModelArgs
-from tokenizer import Tokenizer
+from train_tok.tokenizer import Tokenizer
 import polars as pl
-from evaluators import evaluate_textual_metrics
+from metadata.evaluators import evaluate_textual_metrics
 from itertools import chain
 
-
-# Global constants
-checkpoint_dir = "out/ckpt/"
-tokenizer_path = "tokenizer.model"
-expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
-metrics_csv_path = "data/tok0/overall_metadata_for_vocab_0.csv"
+# -----------------------------------------------------------------------------
+from utils.paths import checkpoint_dir, tokenizer_path, metrics_csv_path
 
 # -----------------------------------------------------------------------------
 # test utilities

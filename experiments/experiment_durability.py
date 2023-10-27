@@ -11,7 +11,11 @@ from tinystories import PretokDataset
 
 from visualize_all import visualize_all
 
-from eval import run_evaluation, tokenizer_path, metrics_csv_path
+from metadata.checkpoint_metadata import (
+    run_evaluation,
+    tokenizer_path,
+    metrics_csv_path,
+)
 
 import os
 import subprocess

@@ -6,7 +6,7 @@ import pickle
 from contextlib import nullcontext
 import torch
 from modelling.model import ModelArgs, Transformer
-from tokenizer import Tokenizer
+from train_tok.tokenizer import Tokenizer
 
 from utils.functions import get_tokenizer_model_path
 
