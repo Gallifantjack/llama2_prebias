@@ -1,100 +1,68 @@
-import numpy as np
-import pytest
+import pandas as pd
 import os
-import polars as pl
-
-from metadata.batch_metadata import detokenize_from_bin
+import pytest
 
 
-# check concordance between metadata and idx file
-@pytest.fixture
-def computed_metrics_and_indices(data_cache_dir, vocab_size_abs):
-    metrics_output_path = os.path.join(
-        data_cache_dir, f"tok{vocab_size_abs}/metadata.csv"
+def load_dataframe(data_cache_dir, vocab_size_abs):
+    parquet_path = os.path.join(
+        data_cache_dir, f"tok{vocab_size_abs}", "merged_data_with_metadata.parquet"
     )
-    empty_ids_output_path = os.path.join(
-        data_cache_dir, f"tok{vocab_size_abs}/empty_ids.csv"
+    return pd.read_parquet(parquet_path)
+
+
+def test_no_duplicate_ids(data_cache_dir, vocab_size_abs):
+    df = load_dataframe(data_cache_dir, vocab_size_abs)
+    duplicate_ids = df[df.duplicated(subset="id")]
+    assert duplicate_ids.empty, f"Found {duplicate_ids.shape[0]} duplicate IDs!"
+
+
+def test_metadata_completeness(data_cache_dir, vocab_size_abs):
+    df = load_dataframe(data_cache_dir, vocab_size_abs)
+
+    # Given metrics columns
+    metadata_columns = [
+        "bleu_score",
+        "flesch_kincaid_grade",
+        "gunning_fog",
+        "vocabulary_diversity",
+        "subjectivity_score",
+        "sentiment_score",
+        "profanity_check",
+    ]
+
+    rows_with_missing_values = df[df[metadata_columns].isnull().any(axis=1)]
+
+    assert rows_with_missing_values.empty, (
+        f"Found {rows_with_missing_values.shape[0]} rows with missing values! Here are some of them: \n"
+        f"{rows_with_missing_values.head(10)}"
     )
-    idx_file_path = os.path.join(data_cache_dir, f"tok{vocab_size_abs}/merged_data.idx")
 
-    # Read global ids from metadata
-    shard_metrics = pl.read_csv(metrics_output_path).to_pandas().to_dict("records")
-    global_ids_from_metadata = [metric["global_id"] for metric in shard_metrics]
 
-    # Read empty global ids
-    empty_global_ids = (
-        pl.read_csv(empty_ids_output_path).to_pandas()["empty_global_id"].tolist()
+def test_no_nan_values(data_cache_dir, vocab_size_abs):
+    df = load_dataframe(data_cache_dir, vocab_size_abs)
+    null_values_count = df.isnull().sum().sum()  # Sum over all columns and rows
+    assert (
+        null_values_count == 0
+    ), f"There are {null_values_count} NaN/missing values in the dataframe!"
+
+
+def load_original_dataframe(data_cache_dir, vocab_size_abs):
+    parquet_path = os.path.join(
+        data_cache_dir, f"tok{vocab_size_abs}", "merged_data.parquet"
     )
-
-    # Read global ids from idx file
-    with open(idx_file_path, "r") as idx_file:
-        global_ids_from_idx = [
-            int(line.strip().split(",")[0]) for line in idx_file.readlines()
-        ]
-
-    return global_ids_from_metadata, empty_global_ids, global_ids_from_idx
+    return pd.read_parquet(parquet_path)
 
 
-def test_empty_ids_not_in_metadata(computed_metrics_and_indices):
-    global_ids_from_metadata, empty_global_ids, _ = computed_metrics_and_indices
-    assert not any(
-        id in global_ids_from_metadata for id in empty_global_ids
-    ), "Some empty global ids were found in metadata."
+def test_matching_ids(data_cache_dir, vocab_size_abs):
+    df_metadata = load_dataframe(data_cache_dir, vocab_size_abs)
+    df_original = load_original_dataframe(data_cache_dir, vocab_size_abs)
 
+    # Check that the number of rows match
+    assert (
+        df_metadata.shape[0] == df_original.shape[0]
+    ), f"Number of rows mismatch! Metadata: {df_metadata.shape[0]}, Original: {df_original.shape[0]}."
 
-def test_metadata_plus_empty_equals_idx(computed_metrics_and_indices):
-    (
-        global_ids_from_metadata,
-        empty_global_ids,
-        global_ids_from_idx,
-    ) = computed_metrics_and_indices
-    assert len(set(global_ids_from_metadata).union(set(empty_global_ids))) == len(
-        set(global_ids_from_idx)
-    ), "The total unique ids in metadata and empty ids do not match the total in the idx file."
-
-
-def test_no_duplicates_in_metadata(computed_metrics_and_indices):
-    global_ids_from_metadata, _, _ = computed_metrics_and_indices
-    assert len(global_ids_from_metadata) == len(
-        set(global_ids_from_metadata)
-    ), "Duplicate global ids found in metadata.csv"
-
-
-def test_no_duplicates_in_idx(computed_metrics_and_indices):
-    _, _, global_ids_from_idx = computed_metrics_and_indices
-    assert len(global_ids_from_idx) == len(
-        set(global_ids_from_idx)
-    ), "Duplicate global ids found in idx file."
-
-
-# empty ids
-
-
-# emptt metadata
-
-# test tokenizer
-
-
-# def test_detokenize_from_bin(mock_data):
-#     bin_file, idx_file, tokenizer_path = mock_data
-
-#     expected_texts = ["hello"]
-#     expected_global_ids = [0]
-#     expected_empty_indices = []
-
-#     texts, global_ids, empty_indices = detokenize_from_bin(
-#         bin_file, idx_file, tokenizer_path
-#     )
-
-#     assert texts == expected_texts, f"Expected {expected_texts}, but got {texts}"
-#     assert (
-#         global_ids == expected_global_ids
-#     ), f"Expected {expected_global_ids}, but got {global_ids}"
-#     assert (
-#         empty_indices == expected_empty_indices
-#     ), f"Expected {expected_empty_indices}, but got {empty_indices}"
-
-
-# Run pytest
-if __name__ == "__main__":
-    pytest.main()
+    # Check if IDs match in both dataframes
+    assert (
+        df_metadata["id"] == df_original["id"]
+    ).all(), "IDs in the metadata and original dataframes do not match!"

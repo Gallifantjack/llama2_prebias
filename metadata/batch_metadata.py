@@ -1,74 +1,69 @@
+# -----------------------------------------------------------------------------
+
 import argparse
-import glob
 import math
-import json
 import os
-from typing import List
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-import glob
-import cProfile
 import itertools
 
 import numpy as np
 import sentencepiece as spm
-import torch.distributed as dist
 from tqdm import tqdm
 
-import polars as pl
 import pandas as pd
-from torch.utils.data import Sampler
+import dask.dataframe as dd
 
-# relative imports
 from metadata.evaluators import evaluate_textual_metrics
 from train_tok.tokenizer import Tokenizer
-
 from utils.paths import DATA_CACHE_DIR
 from utils.functions import get_tokenizer_model_path
 
 # -----------------------------------------------------------------------------
-expected_stdout = b"Once upon a time, there was a little girl named Lily. She loved to play outside in the park. One day, she saw a big, red ball. She wanted to play with it, but it was too high.\nLily's mom said, \"Lily, let's go to the park.\" Lily was sad and didn't know what to do. She said, \"I want to play with your ball, but I can't find it.\"\nLily was sad and didn't know what to do. She said, \"I'm sorry, Lily. I didn't know what to do.\"\nLily didn't want to help her mom, so she"
+
+expected_stdout = b"Once upon a time, there was a little girl named Lily..."
 
 
 # -----------------------------------------------------------------------------
 # Metadata functions
-def detokenize_from_bin(bin_file, idx_file, tokenizer_path, debug=False):
-    CHUNK_SIZE = 10 * 1024 * 1024  # For example, 10 MB
+def string_to_list(string_repr):
+    try:
+        # Trim the brackets and split by comma
+        return [int(token) for token in string_repr[1:-1].split()]
+    except (ValueError, IndexError):
+        return []
+
+
+def detokenize_from_parquet(parquet_file, tokenizer_path, debug=False, chunk_size=5000):
     enc = Tokenizer(tokenizer_model=tokenizer_path)
-    texts, global_ids, empty_indices = [], [], []
-    offsets = []
 
-    with open(idx_file, "r") as idx:
-        for line in idx:
-            global_id, byte_offset, token_length = map(int, line.strip().split(","))
-            offsets.append((global_id, byte_offset, token_length))
-            if debug and len(offsets) >= 200:
-                break
+    texts = []
+    global_ids = []
 
-    with open(bin_file, "rb") as f:
-        chunk_start = 0
-        while chunk_start < os.path.getsize(bin_file):
-            f.seek(chunk_start)
-            chunk = f.read(CHUNK_SIZE)
-            next_chunk_start = chunk_start + CHUNK_SIZE
+    # Using Dask to read Parquet file in chunks
+    ddf = dd.read_parquet(parquet_file, engine="pyarrow")
 
-            # Process offsets that are inside the current chunk
-            while offsets and offsets[0][1] < next_chunk_start:
-                global_id, byte_offset, token_length = offsets.pop(0)
-                relative_offset = byte_offset - chunk_start
-                tokens = np.frombuffer(
-                    chunk[relative_offset : relative_offset + token_length * 2],
-                    dtype=np.uint16,
-                )
-                decoded_text = enc.decode(tokens.tolist())
-                if not decoded_text.strip():
-                    empty_indices.append(global_id)
-                texts.append(decoded_text)
-                global_ids.append(global_id)
+    # If debugging, limit the dataframe size
+    if debug:
+        partitions = ddf.to_delayed()[
+            :1
+        ]  # Limiting to the first partition for debug mode
+    else:
+        partitions = ddf.to_delayed()
 
-            chunk_start = next_chunk_start
+    for partition in partitions:
+        df = partition.compute()
 
-    return texts, global_ids, empty_indices
+        token_lists = df["tokens"].apply(string_to_list)
+        detokenized_texts_chunk = [enc.decode(tokens) for tokens in token_lists]
+
+        global_ids_chunk = df["id"].tolist()
+
+        texts.extend(detokenized_texts_chunk)
+        global_ids.extend(global_ids_chunk)
+        print(detokenized_texts_chunk[:5])
+
+    return texts, global_ids
 
 
 def worker(texts, global_indices):
@@ -77,18 +72,30 @@ def worker(texts, global_indices):
         metrics = evaluate_textual_metrics(
             detokenized_text, expected_stdout.decode("utf-8")
         )
-        metrics["global_id"] = global_indices[idx]
+        metrics["id"] = global_indices[idx]
         shard_metrics.append(metrics)
     return shard_metrics
 
 
-def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
-    idx_file = bin_file.replace(".bin", ".idx")
-    detokenized_texts, global_indices, empty_global_ids = detokenize_from_bin(
-        bin_file, idx_file, tokenizer_path
+def compute_metadata(vocab_size, debug=False):
+    parquet_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data.parquet"
+    )
+    tokenizer_path = get_tokenizer_model_path(vocab_size)
+
+    # Detokenize stories
+    detokenized_texts, global_indices = detokenize_from_parquet(
+        parquet_path, tokenizer_path, debug
     )
 
-    # Parallelizing the computation
+    # print the first 10 detokenized texts
+    print(detokenized_texts[:10])
+    print(global_indices[:10])
+
+    # Prepare an empty list to hold all metadata
+    all_metadata = []
+
+    # Parallelizing the computation of metrics
     with ProcessPoolExecutor() as executor:
         chunk_size = math.ceil(len(detokenized_texts) / os.cpu_count())
         futures = [
@@ -102,43 +109,31 @@ def compute_shard_metrics(bin_file, tokenizer_path, vocab_size):
         results = [f.result() for f in futures]
 
     # Flattening the results
-    shard_metrics = list(itertools.chain(*results))
+    all_metadata = list(itertools.chain(*results))
 
-    return shard_metrics, empty_global_ids
+    # Convert to DataFrame
+    df_metadata = pd.DataFrame(all_metadata)
 
+    # Load the original DataFrame
+    df_original = pd.read_parquet(parquet_path)
 
-def compute_metadata(vocab_size, debug=False):
-    bin_file = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data.bin")
-    tokenizer_path = get_tokenizer_model_path(vocab_size)
+    # Merge the original DataFrame with the metadata on "id"
+    df_combined = pd.merge(df_original, df_metadata, on="id", how="left")
 
-    # Compute metrics and get empty IDs
-    shard_metrics, empty_global_ids = compute_shard_metrics(
-        bin_file, tokenizer_path, vocab_size
+    # Save to a new Parquet file for comparison
+    new_parquet_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data_with_metadata.parquet"
     )
-
-    # Save results to CSV
-    metrics_output_path = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}/metadata.csv")
-    pl.DataFrame(shard_metrics).write_csv(metrics_output_path)
-
-    empty_ids_output_path = os.path.join(
-        DATA_CACHE_DIR, f"tok{vocab_size}/empty_ids.csv"
-    )
-    pl.DataFrame({"empty_global_id": empty_global_ids}).write_csv(empty_ids_output_path)
+    df_combined.to_parquet(new_parquet_path, index=False)
 
     print(f"Processed data for vocab size: {vocab_size}")
 
 
 # -----------------------------------------------------------------------------
 # CLI for constructing the dataset
-
 if __name__ == "__main__":
-    """ """
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "stage",
-        type=str,
-        choices=["compute_metadata"],
-    )
+    parser.add_argument("stage", type=str, choices=["compute_metadata"])
     parser.add_argument(
         "--vocab_size",
         type=int,
@@ -147,12 +142,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--debug",
-        action="store_true",  # This will store 'True' if the --debug flag is used, otherwise it defaults to 'False'
-        help="Use debug mode, processes only the first 2 shard files in the pretokenize stage.",
+        action="store_true",
+        help="Use debug mode, processes only the first 200 entries in the compute_metadata stage.",
     )
     args = parser.parse_args()
 
-    # depending on the stage call the appropriate function
     if args.stage == "compute_metadata":
         compute_metadata(vocab_size=args.vocab_size, debug=args.debug)
     else:
