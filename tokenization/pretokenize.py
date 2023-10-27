@@ -1,115 +1,121 @@
-import argparse
-import glob
-import math
-import json
-import os
-import random
-import itertools
-from typing import List
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from functools import partial
-import glob
-import cProfile
-
-import numpy as np
-import requests
-import sentencepiece as spm
-import torch
-import torch.distributed as dist
-from tqdm import tqdm
-
-import polars as pl
-import pandas as pd
-from torch.utils.data import Sampler
-
 from utils.paths import DATA_CACHE_DIR
-from utils.functions import create_global_id, get_tokenizer_model_path
+from utils.functions import get_tokenizer_model_path
+import numpy as np
+
+import json
+import glob
+import os
+import pandas as pd
+from tqdm import tqdm
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from train_tok.tokenizer import Tokenizer
 
-# -----------------------------------------------------------------------------
-# Tokenization functions
 
+class PreprocessingPipeline:
+    def __init__(
+        self, tokenizer_model_path, data_cache_dir, vocab_size, max_seq_length
+    ):
+        self.tokenizer_model_path = tokenizer_model_path
+        self.data_cache_dir = data_cache_dir
+        self.vocab_size = vocab_size
+        self.max_seq_length = max_seq_length
+        self.tokenizer = Tokenizer(self.tokenizer_model_path)
+        self.global_id_counter = 0
 
-def process_shard(args, vocab_size):
-    shard_id, shard = args
-    tokenizer_model = get_tokenizer_model_path(vocab_size)
-    enc = Tokenizer(tokenizer_model)
+    def extract_stories(self, shard):
+        with open(shard, "r") as f:
+            data = json.load(f)
+        return [example["story"] for example in data]
 
-    with open(shard, "r") as f:
-        data = json.load(f)
+    def tokenize_story(self, story):
+        return self.tokenizer.encode(story.strip(), bos=True, eos=False)
 
-    shard_data = []
+    def chunk_data(self, data, chunk_size):
+        """Divide data into chunks."""
+        for i in range(0, len(data), chunk_size):
+            yield data[i : i + chunk_size]
 
-    for idx, example in tqdm(enumerate(data), position=shard_id):
-        global_id = create_global_id(shard_id, idx)
-        tokens = enc.encode(example["story"].strip(), bos=True, eos=False)
+    def parallel_tokenize(self, stories_chunk):
+        """Tokenize a chunk of stories."""
+        return [self.tokenize_story(story) for story in stories_chunk]
 
-        # Drop texts with under 5 tokens
-        if len(tokens) < 5:
-            continue
+    def batch_and_pad(self, tokens_list):
+        batches = []
+        for tokens in tokens_list:
+            if len(tokens) > self.max_seq_length:
+                tokens = tokens[: self.max_seq_length]
+            else:
+                padding_length = self.max_seq_length - len(tokens)
+                tokens.extend([0] * padding_length)  # Assuming 0 is the padding token
+            batches.append(np.array(tokens, dtype=np.int32))
+        return batches
 
-        token_length = len(tokens)
-        shard_data.append((global_id, tokens))
+    def process_shard(self, shard):
+        stories = self.extract_stories(shard)
 
-    return shard_data
+        # Divide stories into chunks
+        chunk_size = len(stories) // 30  # assuming 30 cores
+        story_chunks = list(self.chunk_data(stories, chunk_size))
 
+        # Parallelize tokenization across chunks
+        with ProcessPoolExecutor() as executor:
+            tokenized_stories_chunks = list(
+                executor.map(self.parallel_tokenize, story_chunks)
+            )
 
-def pretokenize(vocab_size, debug=False):
-    data_dir = os.path.join(DATA_CACHE_DIR, "TinyStories_all_data")
-    shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
+        # Flatten the tokenized stories
+        tokenized_stories = [
+            story for chunk in tokenized_stories_chunks for story in chunk
+        ]
 
-    # If debug is True, only take the first 2 shard files
-    if debug:
-        shard_filenames = shard_filenames[:2]
+        batches = self.batch_and_pad(tokenized_stories)
+        return batches
 
-    bin_dir = os.path.join(DATA_CACHE_DIR, f"tok{vocab_size}")
-    os.makedirs(bin_dir, exist_ok=True)
+    def run(self, debug=False):
+        data_dir = os.path.join(self.data_cache_dir, "TinyStories_all_data")
+        shard_filenames = sorted(glob.glob(os.path.join(data_dir, "*.json")))
 
-    fun = partial(process_shard, vocab_size=vocab_size)
-    with ProcessPoolExecutor() as executor:
-        all_shard_data = list(executor.map(fun, enumerate(shard_filenames)))
+        if debug:
+            shard_filenames = shard_filenames[:2]
 
-    merged_tokenized_filename = os.path.join(bin_dir, "merged_data.bin")
-    merged_idx_filename = os.path.join(bin_dir, "merged_data.idx")
+        all_batches = []
+        for shard in tqdm(shard_filenames):
+            batches = self.process_shard(shard)
+            all_batches.extend(batches)
 
-    with open(merged_tokenized_filename, "wb") as f, open(
-        merged_idx_filename, "w"
-    ) as idx_file:
-        for shard_data in all_shard_data:
-            for global_id, tokens in shard_data:
-                token_length = len(tokens)
-                idx_file.write(f"{global_id},{f.tell()},{token_length}\n")
-                f.write(np.array(tokens, dtype=np.uint16).tobytes())
+        # Create a DataFrame and write to Parquet
+        start_id = self.global_id_counter
+        end_id = start_id + len(all_batches)
+        df = pd.DataFrame(
+            {
+                "id": range(start_id, end_id),
+                "tokens": all_batches,
+            }
+        )
 
-    print("Done.")
+        parquet_path = os.path.join(
+            self.data_cache_dir, f"tok{self.vocab_size}", "merged_data.parquet"
+        )
+        df.to_parquet(parquet_path, compression="snappy", index=False)
+        self.global_id_counter = end_id
+        print("Done.")
 
-
-# -----------------------------------------------------------------------------
-# CLI for constructing the dataset
 
 if __name__ == "__main__":
-    """ """
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "stage",
-        type=str,
-        choices=["pretokenize"],
-    )
-    parser.add_argument(
-        "--vocab_size",
-        type=int,
-        default=0,
-        help="pretokenization vocab size. 0 = use Llama 2 tokenizer.",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",  # This will store 'True' if the --debug flag is used, otherwise it defaults to 'False'
-        help="Use debug mode, processes only the first 2 shard files in the pretokenize stage.",
-    )
-    args = parser.parse_args()
+    # Set up paths
+    data_cache_dir = DATA_CACHE_DIR
+    vocab_size = 0
+    tokenizer_model_path = get_tokenizer_model_path(vocab_size)
+    max_seq_length = 128
 
-    # depending on the stage call the appropriate function
-    if args.stage == "pretokenize":
-        pretokenize(vocab_size=args.vocab_size, debug=args.debug)
-    else:
-        raise ValueError(f"Unknown stage {args.stage}")
+    # Run the pipeline
+    pipeline = PreprocessingPipeline(
+        tokenizer_model_path, data_cache_dir, vocab_size, max_seq_length
+    )
+    pipeline.run(debug=True)
+
+
+# what are we parallelising in the above script, as we have multiple processes running, but very little usage and tqdm stuck on 0% .
+
+# check for errors in the above script. we are looking for unique ids and efficient storage of token batches that can be indexed by these unique ids
