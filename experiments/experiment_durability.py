@@ -5,11 +5,6 @@ from shutil import copyfile, rmtree
 import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
-import polars as pl
-
-from tinystories import PretokDataset
-
-from visualize_all import visualize_all
 
 from metadata.checkpoint_metadata import (
     run_evaluation,
@@ -40,14 +35,12 @@ if __name__ == "__main__":
     # Different combinations of arguments
 
     argument_combinations = [
-        # Sentence length - Ascending
+        # flesch_kincaid_grade - Ascending
         [
-            "--batch_selection",
-            "sort_column",
-            "--sort_by_column",
+            "--transform_method",
+            "sort_ascending",
+            "--transform_column",
             "flesch_kincaid_grade",
-            "--sort_by_direction",
-            "asc",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -57,14 +50,12 @@ if __name__ == "__main__":
             "--out_dir",
             "out/flesch_kincaid_asc",
         ],
-        # Sentence length - Descending
+        # flesch_kincaid_grade - Descending
         [
-            "--batch_selection",
-            "sort_column",
-            "--sort_by_column",
+            "--transform_method",
+            "sort_descending",
+            "--transform_column",
             "flesch_kincaid_grade",
-            "--sort_by_direction",
-            "desc",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -74,14 +65,12 @@ if __name__ == "__main__":
             "--out_dir",
             "out/flesch_kincaid_desc",
         ],
-        # subjectivity_score
+        # subjectivity_score ascending
         [
-            "--batch_selection",
-            "sort_column",
-            "--sort_by_column",
+            "--transform_method",
+            "sort_ascending",
+            "--transform_column",
             "subjectivity_score",
-            "--sort_by_direction",
-            "asc",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -91,14 +80,12 @@ if __name__ == "__main__":
             "--out_dir",
             "out/subj_score_asc",
         ],
-        # subjectivity_score
+        # subjectivity_score descending
         [
-            "--batch_selection",
-            "sort_column",
-            "--sort_by_column",
+            "--transform_method",
+            "sort_descending",
+            "--transform_column",
             "subjectivity_score",
-            "--sort_by_direction",
-            "desc",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -111,7 +98,5 @@ if __name__ == "__main__":
     ]
 
 for args in argument_combinations:
-    run_train_script("train.py", args)
+    run_train_script("modelling/train.py", args)
 
-    for args in argument_combinations:
-        run_train_script("train.py", args)

@@ -79,7 +79,7 @@ def setup_args_and_run(**override_args):
     parser.add_argument(
         "--transform_method",
         type=str,
-        choices=["sort_ascending", "filter_by_threshold", "combined_transform", "none"],
+        choices=["sort_ascending", "sort_descending", "filter_by_threshold", "combined_transform", "none"],
         default="none",
         help="Transformation method to use on the dataset",
     )
@@ -215,6 +215,8 @@ def main(args):
     # Batch selection
     def get_select_func(selection_strategy, column_name=None, threshold=None):
         if selection_strategy == "sort_ascending" and column_name:
+            return partial(sort_ascending, column_name=column_name)
+        elif selection_strategy == "sort_descending" and column_name:
             return partial(sort_ascending, column_name=column_name)
         elif selection_strategy == "filter_by_threshold" and column_name and threshold:
             return partial(
@@ -388,9 +390,12 @@ def train_model(
     iter_num = args.iter_num
 
     print(f"Model is on: {args.device}")
+    # Create the out directory if it doesn't exist along with out + ckpt and out + models
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "ckpt"), exist_ok=True)
+    os.makedirs(os.path.join(out_dir, "models"), exist_ok=True)
 
     # functions
-
     # helps estimate an arbitrarily accurate loss over either split using many batches
     @torch.no_grad()
     def estimate_loss():
