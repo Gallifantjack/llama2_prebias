@@ -121,3 +121,13 @@ Output metrics are calculated for a model at each checkpoint. These metrics are 
 ## License
 
 MIT
+
+# JG final notes
+- confirm sorting working as sat curves look weird
+- Think about metrics for sharing
+- run full llama2.c config
+- Plan arxiv / wikipedia experiments
+  - download
+  - dataset classes
+  - memory management
+  - evaluation metrics addition
