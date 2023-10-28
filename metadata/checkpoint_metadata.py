@@ -5,9 +5,15 @@ from train_tok.tokenizer import Tokenizer
 import polars as pl
 from metadata.evaluators import evaluate_textual_metrics
 from itertools import chain
+from pathlib import Path
 
 # -----------------------------------------------------------------------------
-from utils.paths import checkpoint_dir, tokenizer_path, metrics_csv_path
+from utils.paths import (
+    checkpoint_dir,
+    tokenizer_path,
+    metrics_csv_path,
+    expected_stdout,
+)
 
 # -----------------------------------------------------------------------------
 # test utilities
@@ -64,11 +70,7 @@ def evaluate_model(model, tokenizer_path):
 
 
 def run_evaluation(checkpoint_directory, tokenizer_filepath, metrics_csv_filepath):
-    checkpoint_files = [
-        os.path.join(checkpoint_directory, file)
-        for file in os.listdir(checkpoint_directory)
-        if file.endswith(".pt")
-    ]
+    checkpoint_files = list(Path(checkpoint_directory).glob("*.pt"))
 
     checkpoint_output_results = []
     checkpoint_batch_results = pl.DataFrame()

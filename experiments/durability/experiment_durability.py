@@ -6,11 +6,6 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from metadata.checkpoint_metadata import (
-    run_evaluation,
-    tokenizer_path,
-    metrics_csv_path,
-)
 
 import os
 import subprocess
@@ -42,11 +37,11 @@ if __name__ == "__main__":
             "--transform_column",
             "flesch_kincaid_grade",
             "--max_iters",
-            "10000",
-            "--eval_interval",
             "1000",
-            "--eval_iters",
+            "--eval_interval",
             "100",
+            "--eval_iters",
+            "10",
             "--out_dir",
             "out/flesch_kincaid_asc",
         ],
@@ -56,27 +51,27 @@ if __name__ == "__main__":
             "sort_descending",
             "--transform_column",
             "flesch_kincaid_grade",
-            "--max_iters",
-            "10000",
-            "--eval_interval",
-            "1000",
-            "--eval_iters",
-            "100",
+            # "--max_iters",
+            # "1000",
+            # "--eval_interval",
+            # "100",
+            # "--eval_iters",
+            # "10",
             "--out_dir",
             "out/flesch_kincaid_desc",
-        ],
+        ]
         # subjectivity_score ascending
         [
             "--transform_method",
             "sort_ascending",
             "--transform_column",
             "subjectivity_score",
-            "--max_iters",
-            "10000",
-            "--eval_interval",
-            "1000",
-            "--eval_iters",
-            "100",
+            # "--max_iters",
+            # "10000",
+            # "--eval_interval",
+            # "1000",
+            # "--eval_iters",
+            # "100",
             "--out_dir",
             "out/subj_score_asc",
         ],
@@ -86,12 +81,12 @@ if __name__ == "__main__":
             "sort_descending",
             "--transform_column",
             "subjectivity_score",
-            "--max_iters",
-            "10000",
-            "--eval_interval",
-            "1000",
-            "--eval_iters",
-            "100",
+            # "--max_iters",
+            # "10000",
+            # "--eval_interval",
+            # "1000",
+            # "--eval_iters",
+            # "100",
             "--out_dir",
             "out/subj_score_desc",
         ],
@@ -99,4 +94,3 @@ if __name__ == "__main__":
 
 for args in argument_combinations:
     run_train_script("modelling/train.py", args)
-

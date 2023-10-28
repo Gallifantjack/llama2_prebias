@@ -31,7 +31,7 @@ During this process each shard is tokenized and global ids are created
 ```bash
 python metadata/batch_metadata.py compute_metadata
 ```
-Here each sample is evaluated using metrics such as perplexity and sentence length. These are the same as what is used in model evaluation in 3.
+Here each sample is evaluated using metrics such as perplexity and sentence length. These are the same metrics as what is used in model evaluation in 3.
 
 Batch metrics are stored in out/tables/batch_metrics.csv
 
@@ -40,44 +40,11 @@ Batch metrics are stored in out/tables/batch_metrics.csv
 
 
 ```bash
-python train.py
+python modelling/train.py
 ```
-This creates a model.bin file in the root directory that contains the trained model.
+The Modelling folder contains the model configurations, training loop, and dataset class. It also contains the custom sampler and transformation functions that allow modification of the batch order.
 
-During this process the batch ids used in each checkpoint are stored in the checkpoint file.
-
-details>
-  <summary>Hardware usage</summary>
-
-##### Training config:
-- **Dataset**: tinystories
-- 
-- **Batch Size**: 32 (Micro-batch if gradient accumulation steps > 1)
-- **Sequence Length**: 128
-- **Vocabulary Size**: 32000 tokens
-
-- **Dimension**: 288
-- **Layers**: 6
-- **Heads**: 6
-
-- **Learning Rate**: 5e-4
-- **Total Training Iterations**: 34000
-- **Gradient Clipping**: 1.0
-
-- **Device**: cuda
-- **Data Type**: bfloat16
-
-##### Max Usage:
-- **CPU**: 1-2 core 100%
-- **GPU**: 100% 
-- **RAM**: <12GB
-- **VRAM**: <5GB
-- **Time**: ~30mins
-
-  
-</details>
-
-
+During training checkpoint files contain embeddings, attention weights, and batches used to that point, and the model folder contains the bin files. These are all store in the out folder.
 
 
 ### 3. Model Evaluation
@@ -88,8 +55,9 @@ There are three main scripts for checkpoint evaluation:
 python visualize_attn.py
 ```
 
-These take the stored attention weights from each checkpoint and plot the attention weights for each layer and head
-python visualize_embd.py
+These take the stored attention weights from each checkpoint and plot the attention weights for each layer and head.
+
+All plots from this section are stored in the model specific out dir/visualize
 
 #### b. Embedding Visualization
 ```bash
@@ -98,7 +66,6 @@ python visualize_embd.py
 
 This takes the stored embeddings from each checkpoint and plots the embeddings using PCA.
 
-All plots are stored in out/visualize
 
 #### c. input/output Evaluation
 ```bash
@@ -108,61 +75,45 @@ To evaluate the output this loads the model and generates a sequence of 200 toke
 
 For the batch metrics, these metrics were already calculated in stage 1b. This script just loads the table and adds the batch metrics of those batches used at a given checkpoint to a summary table.
 
-details>
-  <summary>Hardware usage</summary>
 
-##### Hardware used:
+#### d. Saturation curves
+```bash
+python visualize_sat_curves.py
+```
+This script takes the batch metadata (1c) and the model ouput metadata (3c) and plots the metrics for each checkpoint next to each other. This allows for easy comparison of the metrics of model inputs and outputs
+
+## 5. Experiments
+
+### a. Durability
+```bash
+python experiments/durability/experiment_durability.py
+```
+
+This script takes the model input metadata (1c) and sorts the batches by a given metric. It then trains the model on the sorted batches and evaluates the model output (3c). 
+
+Saturation curves are then plotted for each metric and compared to the saturation curves of the unsorted model. Comparisons across time as well as the end points are made to see if the same data in different orders has different effects on the end model.
+
+
+
+## 6. Ideal Batch selection TBC
+The goal here is to perform dynamic batch sampling based on model output. 
+
+Output metrics are calculated for a model at each checkpoint. These metrics are then used to update the probability of a batch being selected for the next training epoch.
+
+
+
+## Hardware used:
 - **CPU**: intel i9 32 core
 - **GPU**: 1x RTX 4090 
 - **RAM**: 64GB
 - **VRAM**: 24GB
 
-##### Training config:
-as in 2.
-
-##### Max Usage:
-- **CPU**: 32 core 100%
-- **GPU**: 0% 
-- **RAM**: <8GB
-- **VRAM**: 0GB
-- **Time**: ~7mins
-
-  
-</details>
-
-
-### 4. Saturation curves
-#### a. Output curves
-```bash
-python visualize_sat_curves.py
-```
-This script takes the summary table produced in 3. and the summarised batch metrics for each checkpoint and produces one plot with 2 subplots demonstrating the metrics over checkpoint.
-
-Plots are stored in out/visualize/batch_output_curves.png
-
-#### b. Batch input curves
-
-```bash
-python visualize_sat_batch.py
-```
-Plots are stored in out/visualize/sat_curves_batch.png
-
-## 5. Batch play
-- play with sequencing 
-- add specific tag to seq for durability
-
-## 6. Ideal Batch selection
-- ideal batch selection
-
-
-### Technical requirements
-
-
-
-
-
 ## TODO
 - wandb integration
+- Metrics to add
+  - k-word accuracy
+  - Sophisticated co-occurrance
+  - real toxicity flags
 
 ## License
 
