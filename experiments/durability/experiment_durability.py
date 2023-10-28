@@ -6,9 +6,10 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
+from metadata.checkpoint_metadata import run_evaluation
+from pathlib import Path
 
-import os
-import subprocess
+# -----------------------------------------------------------------------------
 
 
 def run_train_script(script_name, args=None):
@@ -59,7 +60,7 @@ if __name__ == "__main__":
             # "10",
             "--out_dir",
             "out/flesch_kincaid_desc",
-        ]
+        ],
         # subjectivity_score ascending
         [
             "--transform_method",
@@ -92,5 +93,18 @@ if __name__ == "__main__":
         ],
     ]
 
-for args in argument_combinations:
-    run_train_script("modelling/train.py", args)
+    for args in argument_combinations:
+        # train the model
+        # run_train_script("modelling/train.py", args)
+
+        # Get the out_dir from the args
+        try:
+            out_dir_index = args.index("--out_dir")
+            out_dir = args[out_dir_index + 1]
+        except ValueError:  # --out_dir not found in args
+            out_dir = None
+        except IndexError:  # --out_dir found but no value after it
+            out_dir = None
+
+        # Run the evaluation
+        run_evaluation(out_dir, vocab_size=0)

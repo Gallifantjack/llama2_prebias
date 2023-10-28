@@ -7,13 +7,10 @@ from metadata.evaluators import evaluate_textual_metrics
 from itertools import chain
 from pathlib import Path
 
-# -----------------------------------------------------------------------------
-from utils.paths import (
-    checkpoint_dir,
-    tokenizer_path,
-    metrics_csv_path,
-    expected_stdout,
-)
+# Import necessary utilities
+from utils.paths import DATA_CACHE_DIR
+from metadata.batch_metadata import expected_stdout
+from utils.functions import get_tokenizer_model_path
 
 # -----------------------------------------------------------------------------
 # test utilities
@@ -23,8 +20,6 @@ def load_model_from_checkpoint(checkpoint_file):
     checkpoint_dict = torch.load(checkpoint_file, map_location="cpu")
     # load batch info
     batch_info = checkpoint_dict["batch_indices_trained"]
-    print(f'Batch indices trained on for checkpoint "{checkpoint_file}":')
-    print(batch_info)
 
     model_args = ModelArgs(
         **checkpoint_dict["model_args"]
@@ -69,14 +64,24 @@ def evaluate_model(model, tokenizer_path):
     return metrics
 
 
-def run_evaluation(checkpoint_directory, tokenizer_filepath, metrics_csv_filepath):
+def run_evaluation(out_dir, vocab_size):
+    tokenizer_filepath = get_tokenizer_model_path(vocab_size=vocab_size)
+    parquet_file_path = os.path.join(
+        DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data_with_metadata.parquet"
+    )
+    checkpoint_directory = os.path.join(out_dir, "ckpt")
+
+    print(f"Loading checkpoints from {checkpoint_directory}")
+    print(f"Loading metrics from {parquet_file_path}")
+    print(f"Loading tokenizer from {tokenizer_filepath}")
+
     checkpoint_files = list(Path(checkpoint_directory).glob("*.pt"))
 
     checkpoint_output_results = []
-    checkpoint_batch_results = pl.DataFrame()
+    all_batch_results = []
 
-    df_metrics = pl.read_csv(metrics_csv_filepath)
-    print(df_metrics.tail(5))
+    # Step 1: Adjust the Reading Mechanism
+    df_metrics = pl.read_parquet(parquet_file_path)
 
     for idx, checkpoint_file in enumerate(checkpoint_files):
         print(f"Evaluating checkpoint {idx+1}/{len(checkpoint_files)}")
@@ -89,33 +94,30 @@ def run_evaluation(checkpoint_directory, tokenizer_filepath, metrics_csv_filepat
 
         checkpoint_df = pl.DataFrame({"checkpoint_name": [checkpoint_name]})
         batch_info = list(chain(*[tensor.tolist() for tensor in batch_info]))
-        df_filtered = df_metrics.filter(df_metrics["global_idx"].is_in(batch_info))
-        batch_results = df_filtered.mean()
-        batch_results = batch_results.hstack(checkpoint_df)
-        checkpoint_batch_results = checkpoint_batch_results.vstack(batch_results)
 
-    # Determine directory name for the checkpoint for output structure
-    checkpoint_dir_name = os.path.basename(os.path.normpath(checkpoint_directory))
+        # Step 2: Filter to only batches used at a checkpoint
+        df_filtered = df_metrics.filter(df_metrics["id"].is_in(batch_info))
 
-    # Save the summary results based on the checkpoint directory
-    summary_output_path = f"out/tables/{checkpoint_dir_name}/summary.csv"
-    if not os.path.exists(os.path.dirname(summary_output_path)):
-        os.makedirs(os.path.dirname(summary_output_path))
-    output_df = pl.DataFrame(checkpoint_output_results)
-    output_df.write_csv(summary_output_path)
+        # Step 3: Select only the metrics columns
+        excluded_columns = ["id", "tokens"]
+        metrics = [col for col in df_filtered.columns if col not in excluded_columns]
+        df_filtered = df_filtered.select(metrics)
 
-    # Save the batch results based on the checkpoint directory
-    batch_results_output_path = f"out/tables/{checkpoint_dir_name}/batch_results.csv"
-    if not os.path.exists(os.path.dirname(batch_results_output_path)):
-        os.makedirs(os.path.dirname(batch_results_output_path))
-    print(checkpoint_batch_results)
-    checkpoint_batch_results.write_csv(batch_results_output_path)
+        # Step 4: Calculate the mean of the metrics at a checkpoint
+        batch_results = df_filtered.mean().hstack(checkpoint_df)
+
+        all_batch_results.append(batch_results)  # Append batch results
+
+    # Combine all batch results
+    batch_results_df = pl.concat(all_batch_results)
+
+    # Save to Parquet
+    metadata_dir = os.path.join(out_dir, "metadata")
+    os.makedirs(metadata_dir, exist_ok=True)
+    checkpoint_output_results_df = pl.DataFrame(checkpoint_output_results)
+    checkpoint_output_results_df.write_parquet(
+        os.path.join(metadata_dir, "checkpoint_output_results.parquet")
+    )
+    batch_results_df.write_parquet(os.path.join(metadata_dir, "batch_results.parquet"))
 
     print("Evaluation Done!")
-
-
-# -----------------------------------------------------------------------------
-# run evaluation
-
-if __name__ == "__main__":
-    run_evaluation(checkpoint_dir, tokenizer_path, metrics_csv_path)

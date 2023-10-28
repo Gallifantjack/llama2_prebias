@@ -114,6 +114,9 @@ Output metrics are calculated for a model at each checkpoint. These metrics are 
   - k-word accuracy
   - Sophisticated co-occurrance
   - real toxicity flags
+- Datasets
+  - arxiv / wikipedia
+- Memory optimisation in training loop
 
 ## License
 
