@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     for args in argument_combinations:
         # train the model
-        run_train_script("modelling/train.py", args)
+        # run_train_script("modelling/train.py", args)
 
         # Get the out_dir from the args
         try:

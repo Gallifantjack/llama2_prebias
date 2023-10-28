@@ -88,7 +88,14 @@ def run_evaluation(out_dir, vocab_size):
         checkpoint_output_results.append(result)
 
         checkpoint_df = pl.DataFrame({"checkpoint_name": [checkpoint_name]})
-        batch_info = list(chain(*[tensor.tolist() for tensor in batch_info]))
+        batch_info = list(
+            chain(
+                *[
+                    tensor.tolist() if isinstance(tensor, torch.Tensor) else tensor
+                    for tensor in batch_info
+                ]
+            )
+        )
 
         # Step 2: Filter to only batches used at a checkpoint
         df_filtered = df_metrics.filter(df_metrics["id"].is_in(batch_info))
