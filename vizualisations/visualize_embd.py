@@ -36,19 +36,4 @@ def visualize_embeddings_from_checkpoint(checkpoint_path, save_path):
 
     # Save the figure
     plt.savefig(save_path)
-
-
-# # Example usage
-# checkpoint_dir = "out/ckpt/"
-# checkpoints = [
-#     os.path.join(checkpoint_dir, file)
-#     for file in os.listdir(checkpoint_dir)
-#     if file.endswith(".pt")
-# ]
-
-# for idx, checkpoint_path in enumerate(checkpoints):
-#     print(f"Processing checkpoint {idx+1}/{len(checkpoints)}")
-#     save_path = f"out/visualize/embd/checkpoint_{idx+1}.png"
-#     if not os.path.exists(os.path.dirname(save_path)):
-#         os.makedirs(os.path.dirname(save_path))
-#     visualize_embeddings_from_checkpoint(checkpoint_path, save_path)
+    plt.close()

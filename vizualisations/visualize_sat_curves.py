@@ -22,9 +22,9 @@ def extract_checkpoint_number(filename):
         return None
 
 
-def plot_metrics_from_csv(ax, file_path, name):
-    # Load the CSV file into a Polars DataFrame
-    df = pl.read_csv(file_path)
+def plot_metrics_from_parquet(ax, file_path, name):
+    # Load the Parquet file into a Polars DataFrame
+    df = pl.read_parquet(file_path)
 
     # Sort the DataFrame by checkpoint number for a consistent progression in the plots
     df = df.sort("checkpoint_name")
@@ -54,11 +54,11 @@ if __name__ == "__main__":
 
     # plot for output benchmarks
     output_csv_file_path = "out/tables/summary.csv"
-    plot_metrics_from_csv(ax1, output_csv_file_path, "sat_curves_output")
+    plot_metrics_from_parquet(ax1, output_csv_file_path, "sat_curves_output")
 
     # plot for batch benchmarks
     batch_csv_file_path = "out/tables/batch_results.csv"
-    plot_metrics_from_csv(ax2, batch_csv_file_path, "sat_curves_batch")
+    plot_metrics_from_parquet(ax2, batch_csv_file_path, "sat_curves_batch")
 
     plt.tight_layout()
     plt.savefig("out/visualize/sat/batch_output_curves.png")

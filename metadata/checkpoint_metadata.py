@@ -70,11 +70,6 @@ def run_evaluation(out_dir, vocab_size):
         DATA_CACHE_DIR, f"tok{vocab_size}", "merged_data_with_metadata.parquet"
     )
     checkpoint_directory = os.path.join(out_dir, "ckpt")
-
-    print(f"Loading checkpoints from {checkpoint_directory}")
-    print(f"Loading metrics from {parquet_file_path}")
-    print(f"Loading tokenizer from {tokenizer_filepath}")
-
     checkpoint_files = list(Path(checkpoint_directory).glob("*.pt"))
 
     checkpoint_output_results = []

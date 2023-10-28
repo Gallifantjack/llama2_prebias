@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 from metadata.checkpoint_metadata import run_evaluation
+from vizualisations.visualize_all import visualize_all
 from pathlib import Path
 
 # -----------------------------------------------------------------------------
@@ -106,5 +107,8 @@ if __name__ == "__main__":
         except IndexError:  # --out_dir found but no value after it
             out_dir = None
 
-        # Run the evaluation
-        run_evaluation(out_dir, vocab_size=0)
+        # # Run the evaluation
+        # run_evaluation(out_dir, vocab_size=0)
+
+        # Run visualizations
+        visualize_all(out_dir)
