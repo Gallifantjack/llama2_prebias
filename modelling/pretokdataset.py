@@ -19,7 +19,6 @@ import torch.distributed as dist
 from tqdm import tqdm
 
 from train_tok.tokenizer import Tokenizer
-import polars as pl
 import pandas as pd
 from torch.utils.data import Sampler
 
@@ -46,10 +45,15 @@ class PretokDataset(torch.utils.data.Dataset):
         self.vocab_source = vocab_source
 
         # Load parquet data
+        if vocab_source == "custom":
+            dir_name = f"tok{self.vocab_size}"
+        elif vocab_source == "test":
+            dir_name = os.path.join("test")
+        else:
+            dir_name = "tok0"
+
         parquet_dir = os.path.join(
-            DATA_CACHE_DIR,
-            f"tok{self.vocab_size}" if vocab_source == "custom" else "tok0",
-            "merged_data_with_metadata.parquet",
+            DATA_CACHE_DIR, dir_name, "merged_data_with_metadata.parquet"
         )
         self.data_df = pd.read_parquet(parquet_dir)
 
@@ -65,7 +69,7 @@ class PretokDataset(torch.utils.data.Dataset):
         else:  # split == "valid"
             self.data_df = self.data_df.iloc[split_idx:]
 
-        # Convert the entire tokens column to a list of tensors once during initialization
+        # Convert the entire tokens column
         self.data_df["tokens"] = self.data_df["tokens"].apply(
             lambda x: torch.tensor(x, dtype=torch.int64)
         )

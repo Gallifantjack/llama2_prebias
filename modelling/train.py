@@ -79,7 +79,13 @@ def setup_args_and_run(**override_args):
     parser.add_argument(
         "--transform_method",
         type=str,
-        choices=["sort_ascending", "sort_descending", "filter_by_threshold", "combined_transform", "none"],
+        choices=[
+            "sort_ascending",
+            "sort_descending",
+            "filter_by_threshold",
+            "combined_transform",
+            "none",
+        ],
         default="none",
         help="Transformation method to use on the dataset",
     )
@@ -217,7 +223,7 @@ def main(args):
         if selection_strategy == "sort_ascending" and column_name:
             return partial(sort_ascending, column_name=column_name)
         elif selection_strategy == "sort_descending" and column_name:
-            return partial(sort_ascending, column_name=column_name)
+            return partial(sort_descending, column_name=column_name)
         elif selection_strategy == "filter_by_threshold" and column_name and threshold:
             return partial(
                 filter_by_threshold, column_name=column_name, threshold=threshold
@@ -229,7 +235,7 @@ def main(args):
         else:
             return None  # default
 
-    select_function = get_select_func(
+    transform_func = get_select_func(
         args.transform_method, args.transform_column, args.transform_threshold
     )
 
@@ -243,6 +249,7 @@ def main(args):
         vocab_source=args.vocab_source,
         device=args.device,
         num_workers=0,
+        transform_func=transform_func,
     )
 
     # -----------------------------------------------------------------------------
@@ -553,9 +560,6 @@ def train_model(
             print(
                 f"{iter_num} | loss {lossf:.4f} | lr {lr:e} | {dt*1000:.2f}ms | mfu {running_mfu*100:.2f}%"
             )
-
-        # Reset the attention weights after each iteration
-        # raw_model.reset_all_layers_attention_weights() # debug check this
 
         iter_num += 1
         local_iter_num += 1

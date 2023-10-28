@@ -18,6 +18,16 @@ from modelling.samplers import DynamicSampler
 from modelling.pretokdataset import PretokDataset
 
 
+def collate_fn(batch):
+    x, y, global_ix, metadata = zip(*batch)
+
+    # Stack the data. Assumes x and y are tensors.
+    x = torch.stack(x)
+    y = torch.stack(y)
+
+    return x, y, global_ix, metadata
+
+
 class Task:
     @staticmethod
     def iter_batches(
@@ -34,6 +44,7 @@ class Task:
             sampler=sampler,
             pin_memory=True,
             num_workers=num_workers,
+            collate_fn=collate_fn,
         )
 
         for x, y, global_ix, metadata in dl:

@@ -53,12 +53,12 @@ if __name__ == "__main__":
             "sort_descending",
             "--transform_column",
             "flesch_kincaid_grade",
-            # "--max_iters",
-            # "1000",
-            # "--eval_interval",
-            # "100",
-            # "--eval_iters",
-            # "10",
+            "--max_iters",
+            "1000",
+            "--eval_interval",
+            "100",
+            "--eval_iters",
+            "10",
             "--out_dir",
             "out/flesch_kincaid_desc",
         ],
@@ -68,12 +68,12 @@ if __name__ == "__main__":
             "sort_ascending",
             "--transform_column",
             "subjectivity_score",
-            # "--max_iters",
-            # "10000",
-            # "--eval_interval",
-            # "1000",
-            # "--eval_iters",
-            # "100",
+            "--max_iters",
+            "10000",
+            "--eval_interval",
+            "1000",
+            "--eval_iters",
+            "100",
             "--out_dir",
             "out/subj_score_asc",
         ],
@@ -83,12 +83,12 @@ if __name__ == "__main__":
             "sort_descending",
             "--transform_column",
             "subjectivity_score",
-            # "--max_iters",
-            # "10000",
-            # "--eval_interval",
-            # "1000",
-            # "--eval_iters",
-            # "100",
+            "--max_iters",
+            "10000",
+            "--eval_interval",
+            "1000",
+            "--eval_iters",
+            "100",
             "--out_dir",
             "out/subj_score_desc",
         ],
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     for args in argument_combinations:
         # train the model
-        # run_train_script("modelling/train.py", args)
+        run_train_script("modelling/train.py", args)
 
         # Get the out_dir from the args
         try:
@@ -108,7 +108,7 @@ if __name__ == "__main__":
             out_dir = None
 
         # # Run the evaluation
-        # run_evaluation(out_dir, vocab_size=0)
+        run_evaluation(out_dir, vocab_size=0)
 
         # Run visualizations
         visualize_all(out_dir)

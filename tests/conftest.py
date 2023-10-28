@@ -17,6 +17,14 @@ def vocab_size_abs():
     return 0
 
 
+@pytest.fixture
+def sample_parquet_path():
+    # if os.path.join(DATA_CACHE_DIR, "test/merged_data_with_metadata.parquet") not exist make it
+    if not os.path.exists(os.path.join(DATA_CACHE_DIR, "test")):
+        os.makedirs(os.path.join(DATA_CACHE_DIR, "test"))
+    return os.path.join(DATA_CACHE_DIR, "test/merged_data_with_metadata.parquet")
+
+
 # ----------------------------
 # batch metadata test fixtures
 
