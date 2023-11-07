@@ -68,57 +68,81 @@ def plot_embeddings_from_checkpoint(checkpoint_path):
     return fig
 
 
-def plot_vectors(checkpoint_path, batch_parquet_file_path):
-    # Load output results from a Parquet file
-    output_results_df = pd.read_parquet(checkpoint_path)
+def plot_vectors(checkpoint_path):
+    # Load the checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=torch.device("cpu"))
 
-    # Assuming the DataFrame 'output_results_df' has a column 'all_layers_last_attn_weights' that contains the necessary data
-    # You may need to adjust the following line based on the actual structure of your DataFrame
-    all_layers_activations = [
-        np.stack(weights) for weights in output_results_df["last_attn_weights"]
+    if "last_attn_weights" not in checkpoint:
+        return None  # Handle error case appropriately in your application
+
+    # Retrieve all attention weights and reshape them into a list of vectors, one per layer
+    layers_vectors = [
+        layer_weight.view(-1)
+        .cpu()
+        .numpy()  # Flatten each layer's weights into one vector
+        for layer_weight in checkpoint["last_attn_weights"]
     ]
 
-    # Load batch results from a Parquet file
-    batch_results_df = pd.read_parquet(batch_parquet_file_path)
-
-    # Perform your analysis with output results and batch results here
-    # For now, let's just continue with the PCA part assuming 'all_layers_activations' is a list of NumPy arrays
+    # Normalize and perform PCA on the list of layer vectors
+    normalized_vectors = np.array(
+        [
+            vector / np.linalg.norm(vector)
+            for vector in layers_vectors
+            if np.linalg.norm(vector) > 0
+        ]
+    )
     pca = PCA(n_components=2)
-    normalized_vectors = [
-        activations / np.linalg.norm(activations, axis=1, keepdims=True)
-        for activations in all_layers_activations
-    ]
-    flattened_data = np.concatenate(normalized_vectors, axis=0)
+    pca_result = pca.fit_transform(normalized_vectors)
 
-    pca_result = pca.fit_transform(flattened_data)
-    cosine_sim_matrix = cosine_similarity(flattened_data)
+    # Compute cosine similarity matrix for the layer vectors
+    cosine_sim_matrix = cosine_similarity(normalized_vectors)
 
-    # Create two subplots, one for PCA, one for cosine similarity heatmap
+    # Create a figure with two subplots
     fig = make_subplots(
-        rows=1, cols=2, subplot_titles=("PCA Projections", "Cosine Similarities")
+        rows=1,
+        cols=2,
+        subplot_titles=("PCA Projections", "Cosine Similarity Heatmap"),
+        specs=[[{"type": "scatter"}, {"type": "heatmap"}]],
     )
 
-    # PCA Scatter plot
+    # Add the PCA scatter plot to the first subplot
     fig.add_trace(
         go.Scatter(
             x=pca_result[:, 0],
             y=pca_result[:, 1],
-            mode="markers",
+            mode="markers+text",
+            text=[f"Layer {i+1}" for i in range(len(normalized_vectors))],
             marker=dict(
-                color=np.arange(len(pca_result)),
+                size=8,
+                color=np.arange(len(normalized_vectors)),
                 colorscale="Viridis",
-                colorbar=dict(title="Layer Index"),
+                showscale=True,
             ),
+            name="PCA",
         ),
         row=1,
         col=1,
     )
 
-    # Cosine Similarity Heatmap
-    fig.add_trace(go.Heatmap(z=cosine_sim_matrix, colorscale="Cividis"), row=1, col=2)
+    # Add the cosine similarity heatmap to the second subplot
+    fig.add_trace(
+        go.Heatmap(
+            z=cosine_sim_matrix,
+            colorscale="Cividis",
+            colorbar=dict(title="Cosine Similarity", x=1.1),
+            name="Cosine Similarity",
+        ),
+        row=1,
+        col=2,
+    )
 
-    fig.update_layout(title_text="Vector Analysis Visualization")
+    # Update the layout of the figure
+    fig.update_layout(title="Layer Vector Analysis")
+
     return fig
+
+
+#### SAT CURVES ####
 
 
 def normalize_data(data_list):
@@ -142,34 +166,71 @@ def extract_checkpoint_number(filename):
 
 
 # Function to plot SAT curves from a Parquet file using Plotly
-def plot_sat_curves_from_parquet(file_path, title):
-    df = pd.read_parquet(file_path)
-    # df["checkpoint_number"] = df["checkpoint_name"].apply(extract_checkpoint_number)
-    df.sort_values(by="checkpoint_name", inplace=True)
+def plot_sat_curves_from_parquet(output_path, batch_path, title):
+    # Load the Parquet files into Pandas DataFrames
+    output_df = pd.read_parquet(output_path)
+    batch_df = pd.read_parquet(batch_path)
 
-    excluded_columns = ["checkpoint_number", "text", "global_idx"]
-    metrics = [col for col in df.columns if col not in excluded_columns]
+    # sort both dataframes by checkpoint_name
+    output_df.sort_values(by="checkpoint_name", inplace=True)
+    batch_df.sort_values(by="checkpoint_name", inplace=True)
 
-    # Create the figure for plotting
-    fig = go.Figure()
+    # Assuming both DataFrames have the same structure and the same metrics
+    metrics = [
+        col
+        for col in output_df.columns
+        if col not in ["checkpoint_name", "text", "global_idx"]
+    ]
 
-    for metric in metrics:
-        normalized_values = normalize_data(df[metric].tolist())
+    # Create a subplot figure with shared y-axes and a shared legend
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        shared_yaxes=True,
+        shared_xaxes=False,
+        subplot_titles=("Input Batch Benchmarks", "Output Ckpt Benchmarks"),
+    )
+
+    for i, metric in enumerate(metrics):
+        normalized_output = normalize_data(output_df[metric].tolist())
+        normalized_batch = normalize_data(batch_df[metric].tolist())
+        hovertemplate = f"Metric: {metric}<br>Value: {{y:.3f}}<extra></extra>"
+
+        # Add traces for output benchmarks
         fig.add_trace(
             go.Scatter(
-                x=df["checkpoint_name"],
-                y=normalized_values,
+                x=output_df["checkpoint_name"],
+                y=normalized_output,
                 mode="lines+markers",
                 name=metric,
-            )
+                hovertemplate=hovertemplate,
+            ),
+            row=1,
+            col=2,
+        )
+
+        # Add traces for batch benchmarks
+        fig.add_trace(
+            go.Scatter(
+                x=batch_df["checkpoint_name"],
+                y=normalized_batch,
+                mode="lines+markers",
+                name=metric,
+                hovertemplate=hovertemplate,
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
         )
 
     # Update layout
     fig.update_layout(
         title=title,
-        xaxis_title="Checkpoint Number",
         yaxis_title="Normalized Metric Value",
+        xaxis1_title="Checkpoint Number",
+        xaxis2_title="Checkpoint Number",
         legend_title="Metric",
+        hovermode="closest",
     )
 
     return fig

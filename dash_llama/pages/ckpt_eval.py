@@ -51,11 +51,12 @@ control_panel_layout = dbc.Card(
                 dcc.Dropdown(
                     id="plot-type-dropdown",
                     options=[
+                        {"label": "Layer Similarity", "value": "vector-layer"},
                         {"label": "Attention Weights", "value": "attention"},
                         {"label": "Embedding Visualization", "value": "embedding"},
                         # Add other plot types here
                     ],
-                    value="attention",
+                    value="vector-layer",
                     clearable=False,
                     style={"margin-bottom": "10px"},
                 ),
@@ -99,15 +100,9 @@ layout = dbc.Container(
                             [
                                 dbc.Col(
                                     dcc.Loading(
-                                        children=html.Div(id="sat-curves-output-plot")
+                                        children=html.Div(id="sat-curves-plot")
                                     ),
-                                    md=6,
-                                ),
-                                dbc.Col(
-                                    dcc.Loading(
-                                        children=html.Div(id="sat-curves-batch-plot")
-                                    ),
-                                    md=6,
+                                    md=12,
                                 ),
                             ],
                             className="mb-4",  # Add margin below the SAT curve plots
@@ -131,23 +126,11 @@ layout = dbc.Container(
 
 
 # Callbacks for plotting SAT curves output and batch results
-@callback(
-    Output("sat-curves-output-plot", "children"),
-    [Input("model-dropdown", "value")],
-)
-def update_output_sat_curves_plot(model_name):
-    path = checkpoint_output_results_path(model_name)
-    fig = plot_sat_curves_from_parquet(path, "SAT Curves Output")
-    return dcc.Graph(figure=fig)
-
-
-@callback(
-    Output("sat-curves-batch-plot", "children"),
-    [Input("model-dropdown", "value")],
-)
-def update_batch_sat_curves_plot(model_name):
-    path = batch_parquet_file_path(model_name)
-    fig = plot_sat_curves_from_parquet(path, "SAT Curves Batch")
+@callback(Output("sat-curves-plot", "children"), [Input("model-dropdown", "value")])
+def update_sat_curves_plot(model_name):
+    output_path = checkpoint_output_results_path(model_name)
+    batch_path = batch_parquet_file_path(model_name)
+    fig = plot_sat_curves_from_parquet(output_path, batch_path, "SAT Curves")
     return dcc.Graph(figure=fig)
 
 
@@ -166,7 +149,7 @@ def update_selected_plot(model_name, plot_type, epoch):
         fig = plot_attention_from_checkpoint(checkpoint_path)
     elif plot_type == "embedding":
         fig = plot_embeddings_from_checkpoint(checkpoint_path)
-    elif plot_type == "vector":
+    elif plot_type == "vector-layer":
         fig = plot_vectors(checkpoint_path)
     else:
         raise ValueError(f"Unsupported plot type: {plot_type}")
