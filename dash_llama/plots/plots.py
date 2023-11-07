@@ -6,6 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from plotly.subplots import make_subplots
 import numpy as np
 import pandas as pd
+import plotly.express as px
 
 
 # Plotly function to visualize attention from checkpoint
@@ -66,6 +67,11 @@ def plot_embeddings_from_checkpoint(checkpoint_path):
     )
 
     return fig
+
+
+##### VECTOR LAYER ANALYSIS #####
+
+# single epoch
 
 
 def plot_vectors(checkpoint_path):
@@ -138,6 +144,105 @@ def plot_vectors(checkpoint_path):
 
     # Update the layout of the figure
     fig.update_layout(title="Layer Vector Analysis")
+
+    return fig
+
+
+# multiple epochs
+def plot_vectors_multiple_epochs(epoch_paths):
+    pca = PCA(n_components=2)
+    fig = make_subplots(
+        rows=1,
+        cols=2,
+        subplot_titles=("PCA Projections", "Cosine Similarity Across Layers"),
+        specs=[[{"type": "scatter"}, {"type": "scatter"}]],
+        horizontal_spacing=0.1,  # Adjust spacing to your liking
+    )
+
+    # Define a color palette for epochs
+    colorscale = px.colors.qualitative.Set1
+
+    # Store PCA results for each epoch
+    pca_results = []
+
+    # Iterate over each epoch to calculate PCA projections
+    for i, checkpoint_path in enumerate(epoch_paths):
+        checkpoint = torch.load(checkpoint_path, map_location=torch.device("cpu"))
+        if "last_attn_weights" not in checkpoint:
+            continue
+
+        # Flatten and normalize the attention weights
+        layers_vectors = [
+            layer_weight.view(-1).cpu().numpy()
+            for layer_weight in checkpoint["last_attn_weights"]
+        ]
+        normalized_vectors = [
+            vector / np.linalg.norm(vector)
+            for vector in layers_vectors
+            if np.linalg.norm(vector) > 0
+        ]
+        pca_result = pca.fit_transform(normalized_vectors)
+        pca_results.append(pca_result)
+
+        # Plot PCA projections with text labels for each epoch with a unique color
+        fig.add_trace(
+            go.Scatter(
+                x=pca_result[:, 0],
+                y=pca_result[:, 1],
+                mode="markers+text",
+                text=[f"{i+1}" for i in range(len(pca_result))],  # Layer numbers
+                textposition="top center",
+                marker=dict(size=10, color=colorscale[i % len(colorscale)]),
+                name=f"Epoch {i+1}",
+            ),
+            row=1,
+            col=1,
+        )
+
+    # Calculate cosine similarity for each layer across epochs and plot
+    num_layers = len(normalized_vectors)
+    if len(epoch_paths) > 1:
+        # Initialize array to store average cosine similarity for each layer
+        avg_cosine_sim = np.zeros(num_layers)
+
+        # Sum cosine similarities between the same layers across all pairs of epochs
+        for i in range(len(epoch_paths)):
+            for j in range(i + 1, len(epoch_paths)):
+                for layer_idx in range(num_layers):
+                    avg_cosine_sim[layer_idx] += cosine_similarity(
+                        [pca_results[i][layer_idx]], [pca_results[j][layer_idx]]
+                    )[0][0]
+
+        # Calculate the average cosine similarity for each layer
+        avg_cosine_sim /= (len(epoch_paths) * (len(epoch_paths) - 1)) / 2
+
+        # Plot the average cosine similarity for each layer
+        fig.add_trace(
+            go.Scatter(
+                x=[f"Layer {i+1}" for i in range(num_layers)],
+                y=avg_cosine_sim,
+                mode="lines+markers",
+                name="Average Cosine Similarity",
+            ),
+            row=1,
+            col=2,
+        )
+
+        # Update layout
+    fig.update_layout(
+        title="Vector Analysis Across Epochs",
+        # legend=dict(orientation="h", x=0.5, y=1.1, xanchor="center", yanchor="top"),
+        xaxis_title="PCA Dimension 1",
+        yaxis_title="PCA Dimension 2",
+        xaxis2_title="Layer",
+        yaxis2_title="Average Cosine Similarity",
+    )
+
+    # Update xaxis properties if needed
+    fig.update_xaxes(title_text="Layer Number", row=1, col=1)
+
+    # Update yaxis properties if needed
+    fig.update_yaxes(title_text="Cosine Similarity", row=1, col=2)
 
     return fig
 

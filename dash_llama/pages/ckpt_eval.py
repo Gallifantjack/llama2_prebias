@@ -15,6 +15,7 @@ from plots.plots import (
     plot_embeddings_from_checkpoint,
     plot_vectors,
     plot_sat_curves_from_parquet,
+    plot_vectors_multiple_epochs,
 )
 
 from utils.dash_paths import (
@@ -60,14 +61,17 @@ control_panel_layout = dbc.Card(
                     clearable=False,
                     style={"margin-bottom": "10px"},
                 ),
-                html.P("Select Epoch", className="card-text fw-bold mb-2"),
+                html.P("Select Epoch(s)", className="card-text fw-bold mb-2"),
                 dcc.Dropdown(
                     id="epoch-dropdown",
                     options=[
                         {"label": f"Epoch {i}", "value": i}
-                        for i in range(100, 901, 100)  # Assuming epochs 1 to 500
+                        for i in range(100, 901, 100)
                     ],
-                    value=100,
+                    value=[
+                        100
+                    ],  # Default to the first epoch, but allow multiple selections
+                    multi=True,  # Allow multiple selections
                     clearable=False,
                     style={"margin-bottom": "10px"},
                 ),
@@ -142,19 +146,38 @@ def update_sat_curves_plot(model_name):
         Input("epoch-dropdown", "value"),
     ],
 )
-def update_selected_plot(model_name, plot_type, epoch):
-    checkpoint_path = get_checkpoint_path(model_name, epoch)
+def update_selected_plot(model_name, plot_type, epochs):
+    # Build a list of checkpoint paths based on selected epochs
+    checkpoint_paths = [get_checkpoint_path(model_name, epoch) for epoch in epochs]
 
-    if plot_type == "attention":
-        fig = plot_attention_from_checkpoint(checkpoint_path)
-    elif plot_type == "embedding":
-        fig = plot_embeddings_from_checkpoint(checkpoint_path)
-    elif plot_type == "vector-layer":
-        fig = plot_vectors(checkpoint_path)
+    # Handle the case where multiple epochs are selected
+    if len(epochs) > 1:
+        if plot_type == "vector-layer":
+            # Use the function for plotting across multiple epochs
+            fig = plot_vectors_multiple_epochs(checkpoint_paths)
+            return dcc.Graph(figure=fig)
+        else:
+            # Placeholder for other plot types, if needed
+            return html.Div(
+                "Multiple epoch comparison plot for the selected plot type to be implemented."
+            )
     else:
-        raise ValueError(f"Unsupported plot type: {plot_type}")
+        # Handle the case for a single epoch
+        checkpoint_path = checkpoint_paths[
+            0
+        ]  # There will be only one path in this case
 
-    if fig is not None:
-        return dcc.Graph(figure=fig)
-    else:
-        return html.Div("No data available for the selected model and plot type.")
+        if plot_type == "attention":
+            fig = plot_attention_from_checkpoint(checkpoint_path)
+        elif plot_type == "embedding":
+            fig = plot_embeddings_from_checkpoint(checkpoint_path)
+        elif plot_type == "vector-layer":
+            fig = plot_vectors(checkpoint_path)
+        else:
+            raise ValueError(f"Unsupported plot type: {plot_type}")
+
+        return (
+            dcc.Graph(figure=fig)
+            if fig is not None
+            else html.Div("No data available for the selected model and plot type.")
+        )
