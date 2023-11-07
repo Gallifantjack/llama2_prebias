@@ -8,6 +8,7 @@ import argparse
 from vizualisations.visualize_attn import visualize_attention_from_checkpoint
 from vizualisations.visualize_embd import visualize_embeddings_from_checkpoint
 from vizualisations.visualize_sat_curves import plot_metrics_from_parquet
+from vizualisations.visualize_layers import analyze_vectors
 
 
 # Centralized main function to run after training loops
@@ -38,6 +39,13 @@ def visualize_all(out_dir):
         if not os.path.exists(os.path.dirname(attn_path)):
             os.makedirs(os.path.dirname(attn_path))
         visualize_attention_from_checkpoint(checkpoint_path, attn_path)
+
+    # Visualizing attn across layers and models
+    for idx, checkpoint_path in enumerate(checkpoints):
+        print(
+            f"Analyzing and Visualizing Vectors for checkpoint {idx+1}/{len(checkpoints)}"
+        )
+        analyze_vectors(checkpoint_path, viz_path, checkpoint_dir_name, idx)
 
     # Visualizing Embeddings
     for idx, checkpoint_path in enumerate(checkpoints):
