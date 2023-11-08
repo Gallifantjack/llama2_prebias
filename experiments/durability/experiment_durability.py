@@ -32,21 +32,21 @@ if __name__ == "__main__":
     # Different combinations of arguments
 
     argument_combinations = [
-        # flesch_kincaid_grade - Ascending
-        [
-            "--transform_method",
-            "sort_ascending",
-            "--transform_column",
-            "flesch_kincaid_grade",
-            "--max_iters",
-            "1000",
-            "--eval_interval",
-            "100",
-            "--eval_iters",
-            "10",
-            "--out_dir",
-            "out/flesch_kincaid_asc",
-        ],
+        # # flesch_kincaid_grade - Ascending
+        # [
+        #     "--transform_method",
+        #     "sort_ascending",
+        #     "--transform_column",
+        #     "flesch_kincaid_grade",
+        #     "--max_iters",
+        #     "1000",
+        #     "--eval_interval",
+        #     "100",
+        #     "--eval_iters",
+        #     "10",
+        #     "--out_dir",
+        #     "out/flesch_kincaid_asc",
+        # ],
         # flesch_kincaid_grade - Descending
         [
             "--transform_method",
@@ -62,12 +62,12 @@ if __name__ == "__main__":
             "--out_dir",
             "out/flesch_kincaid_desc",
         ],
-        # subjectivity_score ascending
+        # sentiment_score ascending
         [
             "--transform_method",
             "sort_ascending",
             "--transform_column",
-            "subjectivity_score",
+            "sentiment_score",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -77,12 +77,12 @@ if __name__ == "__main__":
             "--out_dir",
             "out/subj_score_asc",
         ],
-        # subjectivity_score descending
+        # sentiment_score descending
         [
             "--transform_method",
             "sort_descending",
             "--transform_column",
-            "subjectivity_score",
+            "sentiment_score",
             "--max_iters",
             "10000",
             "--eval_interval",
@@ -96,7 +96,7 @@ if __name__ == "__main__":
 
     for args in argument_combinations:
         # train the model
-        # run_train_script("modelling/train.py", args)
+        run_train_script("modelling/train.py", args)
 
         # Get the out_dir from the args
         try:
