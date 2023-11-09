@@ -101,19 +101,29 @@ The goal here is to perform dynamic batch sampling based on model output.
 Output metrics are calculated for a model at each checkpoint. These metrics are then used to update the probability of a batch being selected for the next training epoch.
 
 
+## 7. Dashboard
+``` bash
+python dash_llama/app.py
+
+```
 
 ## Hardware used:
 - **CPU**: intel i9 32 core
-- **GPU**: 1x RTX 4090 
+- **GPU**: 1x RTX 4090
 - **RAM**: 64GB
 - **VRAM**: 24GB
 
 ## TODO
-- wandb integration
-- Metrics to add
+- Metrics
+  - Better flags-> https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words
   - k-word accuracy
   - Sophisticated co-occurrance
-  - real toxicity flags
+  - [Benchmarking Large Language Model Capabilities for Conditional Generation](https://aclanthology.org/2023.acl-long.511.pdf)
+  - [Resources and Benchmarks for NLP](https://slds-lmu.github.io/seminar_nlp_ss20/resources-and-benchmarks-for-nlp.html)
+  - [Dynabench](https://arxiv.org/pdf/2104.14337.pdf)
+  - [lexical metrics](https://aclanthology.org/2022.nlppower-1.6.pdf)
+  - [Towards explainable NLG metrics](https://arxiv.org/pdf/2203.11131.pdf)
+
 - Datasets
   - arxiv / wikipedia
 - Memory optimisation in training loop
@@ -124,10 +134,3 @@ MIT
 
 # JG final notes
 - confirm sorting working as sat curves look weird
-- Think about metrics for sharing
-- run full llama2.c config
-- Plan arxiv / wikipedia experiments
-  - download
-  - dataset classes
-  - memory management
-  - evaluation metrics addition
