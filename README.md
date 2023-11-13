@@ -1,6 +1,7 @@
 <!-- exclude_docs -->
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE.txt)
-[![arXiv](https://img.shields.io/badge/arXiv-pending.svg)](https://www.overleaf.com/project/654bbc7fcc22efd04a6c63f6)
+[![Overleaf](https://img.shields.io/badge/overleaf-in_progress-yellow)](https://www.overleaf.com/project/654bbc7fcc22efd04a6c63f6)
+
 <!-- exclude_docs_end -->
 
 
