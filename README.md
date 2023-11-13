@@ -18,7 +18,7 @@ include_docs_end -->
 <div align="center">
 
 <!-- exclude_docs -->
-<img src="assets/dalle_llama_bias.png" alt="Dalle generated LLama image reading books" style="width: 500; height: 500; margin-right: 2%;">
+<img src="assets/dalle_llama_bias.png" alt="Dalle generated LLama image reading books" style="width: 300; height: 300; margin-right: 2%;">
 <!-- exclude_docs_end -->
 <!-- include_docs
 <img src="assets/dalle_llama_bias.png.png" alt="Dalle generated LLama image reading books" style="width: 49%; margin-right: 2%;">
@@ -28,7 +28,8 @@ include_docs_end -->
 
 
 ## 📃 Overview
-***llama2_prebiasing*** challenges traditional methods in large language model training. Utilizing the RedPajama dataset and Llama architecture, this project focuses on a ground-up approach to training language models. Throughout the training process, models are evaluated for coherence, objectivity, bias, and toxicity. Our repository enables the generation of performance curves across multiple metrics, identifying performance plateaus. The impact of training batch sequences on performance saturation and the resultant shifts in performance curves offers deep insights into the malleability of embedding spaces and attention layers during the pretraining phase. Furthermore, the project investigates the persistence of bias by experimenting with different training batch sequences, mapping embedding spaces, attention heads, and output metrics across checkpoints to provide a comprehensive view of model behavior.
+***llama2_prebiasing*** challenges traditional methods in large language model training which rely on large datasets to pretrain models and then rely on fine tuning for specific tasks and editing harmful behaviours.
+
 
 ### How is llama2_prebias unique?
 * **📊 Data-Driven Development:** Emphasizes the importance of diverse and representative data in training robust language models.
@@ -165,16 +166,16 @@ include_docs_end -->
 <br>
 <br>
 
-# Planned Work
+# Planned Work ![Pending](https://img.shields.io/badge/status-pending-red)
 
-| Feature | Description | Status |
-| ------- | ----------- | ------ |
-| Dynamic Batch Sampling | Utilizing model output metrics at each checkpoint to update the probability of batch selection for subsequent training epochs. | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
-| Batch-level Metrics Analysis | Implementing a range of metrics for model evaluation: [Better flags](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words), k-word accuracy, sophisticated co-occurrence, [Benchmarking Large Language Model Capabilities for Conditional Generation](https://aclanthology.org/2023.acl-long.511.pdf), [Resources and Benchmarks for NLP](https://slds-lmu.github.io/seminar_nlp_ss20/resources-and-benchmarks-for-nlp.html), [Dynabench](https://arxiv.org/pdf/2104.14337.pdf), [lexical metrics](https://aclanthology.org/2022.nlppower-1.6.pdf), [Towards explainable NLG metrics](https://arxiv.org/pdf/2203.11131.pdf). | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
-| Dataset Expansion | Extending training to include larger datasets such as arXiv and Wikipedia for more comprehensive model training and evaluation. | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
-| Fine Tuning Effects | Investigating the impacts of fine-tuning on model performance and behavior. | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
-| In-context Learning Exploration | Examining the implications of in-context learning for enhancing model adaptability and understanding. | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
-| Universal IDs for Resources | Implementing universal identifiers for dataset cards and model cards online to streamline resource management and accessibility. | ![In Progress](https://img.shields.io/badge/status-in%20progress-yellow) |
+| Feature | Description |
+| ------- | ----------- |
+| Dynamic Batch Sampling | Utilizing model output metrics at each checkpoint to update the probability of batch selection for subsequent training epochs. |
+| Batch-level Metrics Analysis | Implementing a range of metrics for model evaluation: [Better flags](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words), k-word accuracy, sophisticated co-occurrence, [Benchmarking Large Language Model Capabilities for Conditional Generation](https://aclanthology.org/2023.acl-long.511.pdf), [Resources and Benchmarks for NLP](https://slds-lmu.github.io/seminar_nlp_ss20/resources-and-benchmarks-for-nlp.html), [Dynabench](https://arxiv.org/pdf/2104.14337.pdf), [lexical metrics](https://aclanthology.org/2022.nlppower-1.6.pdf), [Towards explainable NLG metrics](https://arxiv.org/pdf/2203.11131.pdf). |
+| Dataset Expansion | Extending training to include larger datasets such as arXiv and Wikipedia for more comprehensive model training and evaluation. |
+| Fine Tuning Effects | Investigating the impacts of fine-tuning on model performance and behavior. |
+| In-context Learning Exploration | Examining the implications of in-context learning for enhancing model adaptability and understanding. |
+| Universal IDs for Resources | Implementing universal identifiers for dataset cards and model cards online to streamline resource management and accessibility. |
 
 
 ## ✍️ Citing
