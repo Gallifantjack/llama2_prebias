@@ -18,7 +18,7 @@ include_docs_end -->
 <div align="center">
 
 <!-- exclude_docs -->
-<img src="assets/dalle_llama_bias.png" alt="Dalle generated LLama image reading books" style="width: 300; height: 300; margin-right: 2%;">
+<img src="assets/dalle_llama_bias.png" alt="Dalle generated LLama image reading books" style="width: 300px; height: 300px;">
 <!-- exclude_docs_end -->
 <!-- include_docs
 <img src="assets/dalle_llama_bias.png.png" alt="Dalle generated LLama image reading books" style="width: 49%; margin-right: 2%;">
