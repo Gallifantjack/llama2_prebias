@@ -29,17 +29,18 @@ include_docs_end -->
 
 
 ## 📃 Overview
-***llama2_prebiasing*** challenges traditional methods in large language model training which rely on large datasets to pretrain models and then rely on fine tuning for specific tasks and editing harmful behaviours.
+The current machine learning paradigm heavily relies on a pretraining-followed-by-fine-tuning strategy. ***llama2_prebiasing*** aims to critically assess this strategy by exploring its underlying principles and effectiveness.
 
+### Objectives
+The project is driven by two main considerations:
 
-### How is llama2_prebias unique?
-* **📊 Data-Driven Development:** Emphasizes the importance of diverse and representative data in training robust language models.
-* **🔍 Bias-aware Training:** Focused on identifying and mitigating biases during language model training, instead of relying on fine-tuning methods.
-* **🌐 Community Collaboration:** Aims to develop datacards and model cards that can be reused and disseminated online to foster a more inclusive and comprehensive approach to language model development.
+#### 1. Saturation Curves
+- **Goal 1:** Investigate the occurrence of saturation, where a model, given all information in the world and a small set of tasks, ceases to show significant improvement. This goal seeks to understand how saturation relates to the model architecture, the nature of data, and task specificity.
+- **Goal 2:** Analyze the model's performance across various training checkpoints and data inputs pre- and post-saturation. This goal aims to compare performance metrics and losses versus the data used, to understand different models' tendencies and learning behaviors.
 
-
-### Key Concepts
-
+#### 2. Durability
+- **Goal 1:** Examine the malleability of fundamental structures (such as embeddings and attention mechanisms) within models, which is not uniform throughout training and across different architectures. This involves demonstrating these aspects in the context of ordered batch sampling using batch metadata.
+- **Goal 2:** Explore the effects of fine-tuning (FT) models at different stages of training, sensitivity to labels, and overt-> covert bias. This includes controlling for losses and performance metrics to understand the model's ability to remove biases or improve performance.
 <div align="center">
 
 <!-- exclude_docs -->
@@ -52,9 +53,14 @@ include_docs_end -->
 include_docs_end -->
 
 </div>
+<br>
 
-<br>
-<br>
+### Outcomes
+* **🌐 Training with Peripheral vision:** Method for evaluating data used and model performance, detecting covert attributes, throughout LM training- real-time or post-hoc at checkpoint level (on HF?).
+* **📊 Fine-tuning Fragility:** Analysis of model flexibility to new information, ICL, OOD, debiasing throughout training and during fine-tuning
+* **🔍 Bias-aware Training:** Tools for Data and Model card integration with respect to LLMs before and after fine-tuning.
+
+#### ***Timeline = ACL 2024 deadline = February***
 
 # Workpackages
 ## 1. Tinystories  ![Working](https://img.shields.io/badge/status-working-green)
@@ -171,14 +177,16 @@ include_docs_end -->
 
 | Feature | Description |
 | ------- | ----------- |
-| Dynamic Batch Sampling | Utilizing model output metrics at each checkpoint to update the probability of batch selection for subsequent training epochs. |
-| Batch-level Metrics Analysis | Implementing a range of metrics for model evaluation: [Better flags](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words), k-word accuracy, sophisticated co-occurrence, [Benchmarking Large Language Model Capabilities for Conditional Generation](https://aclanthology.org/2023.acl-long.511.pdf), [Resources and Benchmarks for NLP](https://slds-lmu.github.io/seminar_nlp_ss20/resources-and-benchmarks-for-nlp.html), [Dynabench](https://arxiv.org/pdf/2104.14337.pdf), [lexical metrics](https://aclanthology.org/2022.nlppower-1.6.pdf), [Towards explainable NLG metrics](https://arxiv.org/pdf/2203.11131.pdf). |
-| Dataset Expansion | Extending training to include larger datasets such as arXiv and Wikipedia for more comprehensive model training and evaluation. |
-| Fine Tuning Effects | Investigating the impacts of fine-tuning on model performance and behavior. |
-| In-context Learning Exploration | Examining the implications of in-context learning for enhancing model adaptability and understanding. |
+| Input Analysis | Implementing a range of metrics for model evaluation: <br> - [Toxic Flags](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) <br> - Co-occurrence from Danes <br>-  Steroset <br> - CEAT <br> - ILPS <br> - Logits |
+| Output Analysis | Improved metrics for checkpoint evaluation: <br> - [Task Transferability in Large-Scale Multi-Task Learning](https://arxiv.org/abs/2204.11117) <br> - [ICL vs Instruction](https://github.com/Alrope123/rethinking-demonstrations) <br> - Additional downstream task performance e.g. HATEX, TOXD, BOLD,  |
+| Fine Tuning Effects | Deliberate FT on Task specific datasets e.g. [Upstream Mitigation Is Not All You Need](https://aclanthology.org/2022.acl-long.247/), [Overwriting Pretrained Bias with Finetuning Data](https://arxiv.org/abs/2303.06167) |
+| Dataset Expansion | - Path 1 = Extending training to include larger datasets such as arXiv and Wikipedia -> show  LLaMA bias on RedPajama <br> Path 2= Specific use case e.g. more advanced version of [politics](https://arxiv.org/abs/2305.08283) <br> Path 3= Checkpoints and data available e.g. BLOOM|
+| Dynamic Batch Sampling | Utilizing model output metrics at each checkpoint to update the probability of batch selection for subsequent training epochs, REALM/supervised pretraining. |
 | Universal IDs for Resources | Implementing universal identifiers for dataset cards and model cards online to streamline resource management and accessibility. |
-
+| Precursor to MedPaLM eval | <br> - Google agreed to give us checkpoints for PaLM and MedPaLM for evaluation<br> - This project will be proof of methods that we want to evaluate checkpoints with <br> - Need to convince that we need data too|
 
 ## ✍️ Citing
+***Deadline: February 2023***
 The current manuscript is available on [Overleaf](https://www.overleaf.com/project/654bbc7fcc22efd04a6c63f6). 
-**ACL 2024 deadline = Feb**
+
+
