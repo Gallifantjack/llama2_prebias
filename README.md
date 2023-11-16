@@ -1,6 +1,6 @@
 <!-- exclude_docs -->
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE.txt)
-[![Proposed Work](https://img.shields.io/badge/overleaf-in_progress-yellow)](https://docs.google.com/document/d/1cpC-Vha3JHc4jMRtxJicsmA6_9H-Y7V98ZHvPr19haE/edit?usp=sharing)
+[![Proposed Work](https://img.shields.io/badge/Proposal-v1-yellow)](https://docs.google.com/document/d/1cpC-Vha3JHc4jMRtxJicsmA6_9H-Y7V98ZHvPr19haE/edit?usp=sharing)
 
 <!-- exclude_docs_end -->
 
