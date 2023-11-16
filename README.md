@@ -35,12 +35,12 @@ The current machine learning paradigm heavily relies on a pretraining-followed-b
 The project is driven by two main considerations:
 
 #### 1. Saturation Curves
-- **Goal 1:** Investigate the occurrence of saturation, where a model, given all information in the world and a small set of tasks, ceases to show significant improvement. This goal seeks to understand how saturation relates to the model architecture, the nature of data, and task specificity.
+- **Goal 1:** Investigate the occurrence of saturation, where a model, given all information in the world and a small set of tasks, ceases to show significant improvement in one metric. This goal seeks to understand how saturation in one metric relates to others as well as the model architecture, nature of training data, and task specificity.
 - **Goal 2:** Analyze the model's performance across various training checkpoints and data inputs pre- and post-saturation. This goal aims to compare performance metrics and losses versus the data used, to understand different models' tendencies and learning behaviors.
 
 #### 2. Durability
-- **Goal 1:** Examine the malleability of fundamental structures (such as embeddings and attention mechanisms) within models, which is not uniform throughout training and across different architectures. This involves demonstrating these aspects in the context of ordered batch sampling using batch metadata.
-- **Goal 2:** Explore the effects of fine-tuning (FT) models at different stages of training, sensitivity to labels, and overt-> covert bias. This includes controlling for losses and performance metrics to understand the model's ability to remove biases or improve performance.
+- **Goal 1:** Examine the malleability of fundamental structures (such as embeddings and attention mechanisms) within models, which are not uniform throughout training and across different architectures. This involves demonstrating these aspects in the context of ordered batch sampling using batch metadata.
+- **Goal 2:** Explore the effects of continued pretraining at different stages of the process, sensitivity to labels, and overt-> covert bias. This includes controlling for losses and performance metrics to understand the model's ability to learn/unlearn biases or improve performance.
 <div align="center">
 
 <!-- exclude_docs -->
@@ -57,10 +57,8 @@ include_docs_end -->
 
 ### Outcomes
 * **🌐 Training with Peripheral vision:** Method for evaluating data used and model performance, detecting covert attributes, throughout LM training- real-time or post-hoc at checkpoint level (on HF?).
-* **📊 Fine-tuning Fragility:** Analysis of model flexibility to new information, ICL, OOD, debiasing throughout training and during fine-tuning
+* **📊 Fragility:** Analysis of model flexibility to new information during pretraining.
 * **🔍 Bias-aware Training:** Tools for Data and Model card integration with respect to LLMs before and after fine-tuning.
-
-#### ***Timeline = ACL 2024 deadline = February***
 
 <br>
 <br>
@@ -189,7 +187,6 @@ include_docs_end -->
 | Precursor to MedPaLM eval | - Google agreed to give us checkpoints for PaLM and MedPaLM for evaluation<br> - This project will be proof of methods that we want to evaluate checkpoints with <br> - Need to convince that we need data too|
 
 ## ✍️ Citing
-***Deadline: February 2023*** <br>
-The current manuscript is available on [Overleaf](https://www.overleaf.com/project/654bbc7fcc22efd04a6c63f6). 
+***Target Deadline: February 2023*** <br>
 
 
