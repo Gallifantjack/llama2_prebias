@@ -189,7 +189,7 @@ include_docs_end -->
 | Precursor to MedPaLM eval | - Google agreed to give us checkpoints for PaLM and MedPaLM for evaluation<br> - This project will be proof of methods that we want to evaluate checkpoints with <br> - Need to convince that we need data too|
 
 ## ✍️ Citing
-***Deadline: February 2023***
+***Deadline: February 2023*** <br>
 The current manuscript is available on [Overleaf](https://www.overleaf.com/project/654bbc7fcc22efd04a6c63f6). 
 
 
