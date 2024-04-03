@@ -8,7 +8,7 @@
 # <img src = "assets/llama-emoji.png" height=25> llama2_prebiasing
 
 <!-- exclude_docs -->
-> **⚗️ Status:** This project is still in *alpha*, and may change without warning.  
+> **⚗️ Status:** This is a fun project created on a weekend, so is still in *alpha*, and may change without warning.  
 <!-- exclude_docs_end -->
 <!-- include_docs
 :::{important}
@@ -173,20 +173,4 @@ include_docs_end -->
 
 <br>
 <br>
-
-# Planned Work ![Pending](https://img.shields.io/badge/status-pending-red)
-
-| Feature | Description |
-| ------- | ----------- |
-| Input Analysis | Implementing a range of metrics for model evaluation: <br> - [Toxic Flags](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words) <br> - Co-occurrence from Danes <br>-  Steroset <br> - CEAT <br> - ILPS <br> - Logits |
-| Output Analysis | Improved metrics for checkpoint evaluation: <br> - [Task Transferability in Large-Scale Multi-Task Learning](https://arxiv.org/abs/2204.11117) <br> - [ICL vs Instruction](https://github.com/Alrope123/rethinking-demonstrations) <br> - Additional downstream task performance e.g. HATEX, TOXD, BOLD,  |
-| Fine Tuning Effects | Deliberate FT on Task specific datasets e.g. <br> - [Upstream Mitigation Is Not All You Need](https://aclanthology.org/2022.acl-long.247/) <br> - [Overwriting Pretrained Bias with Finetuning Data](https://arxiv.org/abs/2303.06167) |
-| Dataset Expansion | - Path 1 = Extending training to include larger datasets such as arXiv and Wikipedia -> show  LLaMA bias on RedPajama <br> - Path 2= Specific use case e.g. more advanced version of [politics](https://arxiv.org/abs/2305.08283) <br> - Path 3= Checkpoints and data available e.g. BLOOM|
-| Dynamic Batch Sampling | Utilizing model output metrics at each checkpoint to update the probability of batch selection for subsequent training epochs, REALM/supervised pretraining. |
-| Universal IDs for Resources | Implementing universal identifiers for dataset cards and model cards online to streamline resource management and accessibility. |
-| Precursor to MedPaLM eval | - Google agreed to give us checkpoints for PaLM and MedPaLM for evaluation<br> - This project will be proof of methods that we want to evaluate checkpoints with <br> - Need to convince that we need data too|
-
-## ✍️ Citing
-***Target Deadline: February 2023*** <br>
-
 
